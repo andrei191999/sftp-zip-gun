@@ -97,6 +97,7 @@ button.active {
 .toggle-group {
   display: flex;
   gap: 0;
+  flex: 1;
 }
 
 .toggle-group button {
@@ -303,4 +304,49 @@ h3 {
   color: var(--vscode-inputValidation-errorBorder);
   font-size: 0.85em;
   font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   NEW badge (freshly-added accounts, session-transient)
+--------------------------------------------------------------------------- */
+
+.badge-new {
+  background-color: var(--vscode-testing-iconPassed);
+  color: var(--vscode-editor-background);
+  font-size: 0.75em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------------------
+   Log category prefix tags
+--------------------------------------------------------------------------- */
+
+.log-cat {
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.log-cat-upload   { color: var(--vscode-terminal-ansiBlue); }
+.log-cat-conn     { color: var(--vscode-terminal-ansiGreen); }
+.log-cat-import   { color: var(--vscode-terminal-ansiMagenta); }
+.log-cat-accounts { color: var(--vscode-terminal-ansiYellow); }
+.log-cat-sys      { color: var(--vscode-terminal-ansiCyan); }
+
+/* ---------------------------------------------------------------------------
+   Log category filter bar
+--------------------------------------------------------------------------- */
+
+.log-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.log-filter-row button {
+  font-size: 0.8em;
+  padding: 1px 7px;
 }

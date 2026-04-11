@@ -21,7 +21,9 @@ let state = {
   mode: 'zip',              // 'zip' | 'separate'
   folderPath: null,
   uploading: false,
-  logs: [],                 // { level: string, text: string, ts: string }[]
+  logs: [],                 // { level: string, text: string, ts: string, category: string }[]
+  newPresetNames: new Set(),  // session-only: names added this session (cleared on edit)
+  logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
   history: [],              // HistoryEntry[]
   showHistory: false,
   remoteBrowse: null,       // null | { path: string, entries: RemoteEntry[], loading: boolean }
@@ -62,9 +64,9 @@ function nowHHMMSS() {
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
-function pushLog(text, level) {
+function pushLog(text, level, category) {
   var lvl = level || 'info';
-  state.logs.push({ level: lvl, text: text, ts: nowHHMMSS() });
+  state.logs.push({ level: lvl, text: text, ts: nowHHMMSS(), category: category || '' });
   if (state.logs.length > LOG_CAP) { state.logs.shift(); }
 }
 
@@ -148,12 +150,23 @@ function clearEl(node) {
 // Build a styled log box and append it to container. Returns the <pre>.
 function buildLogBox(container) {
   var pre = el('pre', { className: 'log-box' });
-  state.logs.forEach(function (entry) {
+  var visible = state.logs.filter(function (entry) {
+    if (entry.level === 'session') { return true; }  // separators always show
+    if (!entry.category) { return true; }            // uncategorised always show
+    return state.logFilter.has(entry.category);
+  });
+  visible.forEach(function (entry) {
     var line = document.createElement('div');
     if (entry.level === 'session') {
       line.className = 'log-session';
       line.textContent = '\u2500\u2500 ' + entry.text + ' \u2500\u2500';
     } else {
+      if (entry.category) {
+        var catSpan = document.createElement('span');
+        catSpan.className = 'log-cat log-cat-' + entry.category;
+        catSpan.textContent = '[' + entry.category + '] ';
+        line.appendChild(catSpan);
+      }
       var ts = document.createElement('span');
       ts.className = 'log-ts';
       ts.textContent = (entry.ts || '') + ' ';
@@ -168,6 +181,33 @@ function buildLogBox(container) {
   container.appendChild(pre);
   pre.scrollTop = pre.scrollHeight;
   return pre;
+}
+
+// Render a row of category filter toggle buttons above the log box.
+function renderLogFilterBar(container) {
+  var CATS = ['upload', 'conn', 'import', 'accounts', 'sys'];
+  var bar = el('div', { className: 'log-filter-row' });
+
+  var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
+  var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
+  allBtn.addEventListener('click', function () {
+    CATS.forEach(function (c) { state.logFilter.add(c); });
+    render();
+  });
+  bar.appendChild(allBtn);
+
+  CATS.forEach(function (cat) {
+    var active = state.logFilter.has(cat);
+    var btn = el('button', { className: active ? 'active' : 'secondary' }, cat);
+    btn.addEventListener('click', function () {
+      if (state.logFilter.has(cat)) { state.logFilter.delete(cat); }
+      else { state.logFilter.add(cat); }
+      render();
+    });
+    bar.appendChild(btn);
+  });
+
+  container.appendChild(bar);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,14 +248,14 @@ window.addEventListener('message', function (event) {
       var p = msg.payload;
       state.uploading = false;
       var bytesInfo = p.bytesTransferred > 0 ? ' \u00b7 ' + formatBytes(p.bytesTransferred) : '';
-      pushLog('Complete \u2192 ' + p.remoteFile + bytesInfo, 'success');
+      pushLog('Complete \u2192 ' + p.remoteFile + bytesInfo, 'success', 'upload');
       break;
     }
 
     case 'uploadError': {
       var p = msg.payload;
       state.uploading = false;
-      pushLog(p.message, 'error');
+      pushLog(p.message, 'error', 'upload');
       break;
     }
 
@@ -237,11 +277,16 @@ window.addEventListener('message', function (event) {
 
     case 'presetSaved': {
       var saved = msg.payload.preset;
+      // Detect new preset before updating the list
+      var existedBefore = state.presets.some(function (p) {
+        return p.name === saved.name || (msg.payload.originalName && p.name === msg.payload.originalName);
+      });
       // Remove old entry by original name if it exists (handles rename)
       state.presets = state.presets.filter(function (p) { return p.name === saved.name || !msg.payload.originalName || p.name !== msg.payload.originalName; });
       var idx = state.presets.findIndex(function (p) { return p.name === saved.name; });
       if (idx >= 0) { state.presets[idx] = saved; }
       else { state.presets.push(saved); }
+      if (!existedBefore) { state.newPresetNames.add(saved.name); }
       state.selectedPresetName = saved.name;
       state.showPresetForm = false;
       state.editingPreset = null;
@@ -269,7 +314,7 @@ window.addEventListener('message', function (event) {
       var p = msg.payload;
       state.connectionStatus[p.presetName] = p.success ? 'ok' : 'fail';
       var icon = p.success ? '\u2713' : '\u2717';
-      pushLog(icon + ' ' + p.presetName + ': ' + p.message, p.success ? 'success' : 'error');
+      pushLog(icon + ' ' + p.presetName + ': ' + p.message, p.success ? 'success' : 'error', 'conn');
       break;
     }
 
@@ -309,7 +354,7 @@ window.addEventListener('message', function (event) {
       var p = msg.payload;
       state.presets = p.presets;
       state.importPending = false;
-      pushLog('FileZilla import: ' + p.added + ' added, ' + p.duplicates + ' duplicate(s), ' + p.skipped + ' skipped (of ' + p.total + ' found).', 'info');
+      pushLog('FileZilla import: ' + p.added + ' added, ' + p.duplicates + ' duplicate(s), ' + p.skipped + ' skipped (of ' + p.total + ' found).', 'info', 'import');
       // Auto-test all presets that don't already have a status
       p.presets.forEach(function (pr) {
         if (!state.connectionStatus[pr.name]) {
@@ -322,7 +367,7 @@ window.addEventListener('message', function (event) {
 
     case 'log': {
       var p = msg.payload;
-      pushLog(p.text, p.level === 'error' ? 'error' : p.level === 'warn' ? 'warn' : 'info');
+      pushLog(p.text, p.level === 'error' ? 'error' : p.level === 'warn' ? 'warn' : 'info', 'sys');
       break;
     }
 
@@ -430,6 +475,17 @@ function renderUploadView(app) {
     }
 
     rowSendTo.appendChild(sendToSelect);
+
+    // Inline "Set as default" when a saved bookmark is the active selection
+    if (state.selectedPath && state.selectedPath !== '__add_new__') {
+      var inlineSetDefaultBtn = el('button', { className: 'secondary' }, 'Set as default');
+      inlineSetDefaultBtn.addEventListener('click', function () {
+        var pr = getSelectedPreset();
+        if (!pr) { return; }
+        vscode.postMessage({ kind: 'pinFolder', payload: { presetName: pr.name, remotePath: state.selectedPath } });
+      });
+      rowSendTo.appendChild(inlineSetDefaultBtn);
+    }
   }
   app.appendChild(rowSendTo);
 
@@ -531,7 +587,8 @@ function renderUploadView(app) {
   app.appendChild(rowUpload);
 
   // ---- Log output ----
-  var rowLog = el('div', { className: 'row' });
+  var rowLog = el('div', { className: 'row', style: 'flex-direction:column;align-items:stretch;' });
+  renderLogFilterBar(rowLog);
   buildLogBox(rowLog);
   app.appendChild(rowLog);
 
@@ -903,6 +960,9 @@ function renderManageView(app) {
       var badge = el('span', { className: 'badge-readonly' }, '\uD83D\uDD12 drop-box');
       headerDiv.appendChild(badge);
     }
+    if (state.newPresetNames.has(p.name)) {
+      headerDiv.appendChild(el('span', { className: 'badge-new' }, 'NEW'));
+    }
 
     // Connection status indicator
     var cs = state.connectionStatus[p.name];
@@ -932,6 +992,7 @@ function renderManageView(app) {
     var editBtn = el('button', { className: 'secondary' }, 'Edit');
     editBtn.addEventListener('click', (function (preset) {
       return function () {
+        state.newPresetNames.delete(preset.name); // clear NEW badge on edit
         state.editingPreset = preset;
         state.showPresetForm = true;
         state.formAuthType = preset.authType;
@@ -945,7 +1006,7 @@ function renderManageView(app) {
     testBtn.addEventListener('click', (function (preset) {
       return function () {
         state.connectionStatus[preset.name] = 'pending';
-        pushLog('Testing connection to ' + preset.name + '\u2026', 'info');
+        pushLog('Testing connection to ' + preset.name + '\u2026', 'info', 'conn');
         vscode.postMessage({ kind: 'testConnection', payload: { presetName: preset.name } });
         render();
       };
@@ -1007,7 +1068,8 @@ function renderManageView(app) {
   }
 
   // Log output
-  var rowLog = el('div', { className: 'row' });
+  var rowLog = el('div', { className: 'row', style: 'flex-direction:column;align-items:stretch;' });
+  renderLogFilterBar(rowLog);
   buildLogBox(rowLog);
   app.appendChild(rowLog);
 
@@ -1295,7 +1357,7 @@ function buildPresetForm(container) {
       readOnly:   readonlyCheck.checked,
     };
     if (!preset.name || !preset.host || !preset.username) {
-      pushLog('Name, Host, and Username are required.', 'error');
+      pushLog('Name, Host, and Username are required.', 'error', 'accounts');
       render();
       return;
     }
