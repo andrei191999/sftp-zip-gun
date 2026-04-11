@@ -1,0 +1,24 @@
+# Build output
+node_modules/
+dist/
+*.vsix
+
+# Secrets & private configs
+.env
+filezilla-small.xml
+filezilla*.xml
+
+# Real invoice test data — private business documents
+test-fixtures/
+
+# Claude Code / superpowers session state — machine-local, never commit
+.remember/
+.superpowers/
+.claude/settings.local.json
+
+# Throwaway spikes and unrelated binaries
+spikes/
+lib/
+
+# Internal planning artifacts from superpowers brainstorm tool
+docs/superpowers/

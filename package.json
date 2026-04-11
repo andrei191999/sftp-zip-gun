@@ -1,0 +1,136 @@
+{
+  "name": "sftp-upload",
+  "displayName": "SFTP Upload",
+  "description": "Upload XML invoices and ZIP bundles to SFTP intake servers without leaving VS Code.",
+  "version": "0.1.0",
+  "publisher": "am-vs-tools",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "main": "./dist/extension.js",
+  "icon": "icon.png",
+  "categories": ["Other"],
+  "keywords": ["sftp", "upload", "ftp", "xml", "intake", "invoice"],
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onCommand:sftpUpload.openPanel",
+    "onCommand:sftpUpload.quickUpload",
+    "onCommand:sftpUpload.importFileZilla"
+  ],
+  "scripts": {
+    "compile": "esbuild src/extension.ts --bundle --platform=node --external:vscode --external:ssh2-sftp-client --outfile=dist/extension.js --sourcemap",
+    "watch": "npm run compile -- --watch",
+    "package": "vsce package",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "npm run compile"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "sftpUpload.openPanel",
+        "title": "Open Upload Panel",
+        "category": "SFTP Upload",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "sftpUpload.quickUpload",
+        "title": "Quick Upload",
+        "category": "SFTP Upload",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "sftpUpload.importFileZilla",
+        "title": "Import Presets from FileZilla…",
+        "category": "SFTP Upload"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "sftpUpload.openPanel",
+          "when": "resourceExtname == .xml",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "sftpUpload.openPanel",
+          "when": "resourceExtname == .xml",
+          "group": "sftp@1"
+        },
+        {
+          "command": "sftpUpload.quickUpload",
+          "when": "resourceExtname == .xml && sftpUpload.hasPresets",
+          "group": "sftp@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "sftpUpload.openPanel",
+          "when": "resourceExtname == .xml",
+          "group": "sftp@1"
+        },
+        {
+          "command": "sftpUpload.quickUpload",
+          "when": "resourceExtname == .xml && sftpUpload.hasPresets",
+          "group": "sftp@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sftpUpload.quickUpload",
+          "when": "sftpUpload.hasPresets"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "sftpUpload.openPanel",
+        "key": "ctrl+shift+u",
+        "mac": "cmd+shift+u",
+        "when": "resourceExtname == .xml"
+      }
+    ],
+    "configuration": {
+      "title": "SFTP Upload",
+      "properties": {
+        "sftpUpload.presets": {
+          "type": "array",
+          "markdownDescription": "Named SFTP presets (non-sensitive fields only). Use the **⚙ Manage** button in the upload panel for a friendlier editor. Passwords are stored in the OS keychain via VS Code SecretStorage.",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": ["name", "host", "port", "username", "remoteDir", "authType"],
+            "properties": {
+              "name":      { "type": "string",  "description": "Unique display name for this preset." },
+              "host":      { "type": "string",  "description": "SFTP hostname or IP address." },
+              "port":      { "type": "number",  "default": 22, "description": "SFTP port (default: 22)." },
+              "username":  { "type": "string",  "description": "SFTP username." },
+              "remoteDir": { "type": "string",  "description": "Default (pinned) remote directory for uploads." },
+              "authType":  { "type": "string",  "enum": ["password", "key"], "default": "password", "description": "Authentication method." },
+              "keyPath":   { "type": "string",  "default": "", "description": "Absolute path to SSH private key file (key auth only)." },
+              "readOnly":  { "type": "boolean", "default": false, "markdownDescription": "Drop-box server: upload-only, no `stat`/`delete`/`mkdir`. Enable this for intake servers that reject management operations." },
+              "savedPaths": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Bookmarked remote paths for quick multi-target upload selection." }
+            }
+          }
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "fast-xml-parser": "^5.5.11",
+    "ssh2-sftp-client": "^12.1.1"
+  },
+  "devDependencies": {
+    "@types/archiver": "^7.0.0",
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.115.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.2"
+  }
+}

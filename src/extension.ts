@@ -1,0 +1,237 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { PresetManager } from './config/presetManager';
+import { StateManager } from './config/stateManager';
+import { SftpClient, AbortError } from './sftp/sftpClient';
+import { SftpPanel } from './webview/SftpPanel';
+import { generateId } from './types/messages';
+import { initLogger, log } from './logger';
+
+// ---------------------------------------------------------------------------
+// Status bar
+// ---------------------------------------------------------------------------
+
+class StatusBar {
+  private readonly item: vscode.StatusBarItem;
+  private spinnerTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  private spinnerIdx = 0;
+
+  constructor() {
+    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    this.item.command = 'sftpUpload.openPanel';
+    this.item.tooltip = 'SFTP Upload — click to open panel';
+  }
+
+  setIdle(presetName?: string): void {
+    this._clearSpinner();
+    this.item.text = presetName ? `$(cloud-upload) ${presetName}` : `$(cloud-upload) SFTP Upload`;
+    this.item.show();
+  }
+
+  setUploading(): void {
+    this._clearSpinner();
+    this.spinnerTimer = setInterval(() => {
+      this.item.text = `${this.spinnerFrames[this.spinnerIdx++ % this.spinnerFrames.length]} Uploading…`;
+    }, 100);
+    this.item.show();
+  }
+
+  setSuccess(presetName: string): void {
+    this._clearSpinner();
+    this.item.text = `$(check) ${presetName}`;
+    this.item.show();
+    setTimeout(() => this.setIdle(presetName), 3000);
+  }
+
+  setError(): void {
+    this._clearSpinner();
+    this.item.text = `$(issue-opened) Upload failed`;
+    this.item.show();
+  }
+
+  register(context: vscode.ExtensionContext): void {
+    context.subscriptions.push(this.item);
+  }
+
+  private _clearSpinner(): void {
+    if (this.spinnerTimer !== undefined) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = undefined;
+    }
+  }
+}
+
+function createStatusBar(
+  context: vscode.ExtensionContext,
+  presetManager: PresetManager,
+  stateManager: StateManager
+): StatusBar {
+  const bar = new StatusBar();
+  const lastPreset = stateManager.getState().lastPresetName;
+  bar.setIdle(lastPreset);
+  bar.register(context);
+  return bar;
+}
+
+// ---------------------------------------------------------------------------
+// Context helper
+// ---------------------------------------------------------------------------
+
+function updateHasPresetsContext(presetManager: PresetManager): void {
+  void vscode.commands.executeCommand(
+    'setContext',
+    'sftpUpload.hasPresets',
+    presetManager.getAll().length > 0
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Quick upload handler
+// ---------------------------------------------------------------------------
+
+async function handleQuickUpload(
+  commandUri: vscode.Uri | undefined,
+  context: vscode.ExtensionContext,
+  presetManager: PresetManager,
+  stateManager: StateManager,
+  statusBar: StatusBar
+): Promise<void> {
+  const uri = commandUri ?? vscode.window.activeTextEditor?.document.uri;
+  if (!uri) {
+    vscode.window.showErrorMessage('SFTP Upload: No file selected.');
+    return;
+  }
+
+  const presets = presetManager.getAll();
+  if (presets.length === 0) {
+    vscode.window.showErrorMessage('SFTP Upload: No presets configured. Use the Manage panel to add one.');
+    return;
+  }
+
+  let preset = presets.find(p => p.name === stateManager.getState().lastPresetName);
+  if (!preset) {
+    const pick = await vscode.window.showQuickPick(
+      presets.map(p => ({ label: (p.readOnly ? '🔒 ' : '') + p.name, description: `${p.host}:${p.port}`, preset: p })),
+      { title: 'Select SFTP Preset for Quick Upload' }
+    );
+    if (!pick) { return; }
+    preset = pick.preset;
+  }
+
+  const fileName = path.basename(uri.fsPath);
+  const remotePath = preset.remoteDir.replace(/\/$/, '') + '/' + fileName;
+
+  statusBar.setUploading();
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `SFTP: Uploading ${fileName}`, cancellable: true },
+    async (progress, token) => {
+      const client = new SftpClient();
+      token.onCancellationRequested(() => client.abort());
+
+      try {
+        const connectOpts = await presetManager.resolveConnectOptions(preset!);
+        await client.connect(connectOpts);
+        const done = await client.uploadFile(uri.fsPath, remotePath, (p) => {
+          progress.report({ increment: p.percent, message: `${p.percent}%` });
+        });
+        await stateManager.setState({ lastPresetName: preset!.name });
+        await stateManager.addToHistory({
+          id: generateId(),
+          timestamp: new Date().toISOString(),
+          presetName: preset!.name,
+          mode: 'separate',
+          files: [fileName],
+          remoteFile: remotePath,
+          result: 'success',
+        });
+        statusBar.setSuccess(preset!.name);
+        updateHasPresetsContext(presetManager);
+        vscode.window.showInformationMessage(`SFTP Upload: ${fileName} → ${remotePath} (${done.bytesTransferred} bytes)`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const isAbort = err instanceof AbortError;
+        if (!isAbort) {
+          statusBar.setError();
+          vscode.window.showErrorMessage(`SFTP Upload failed: ${message}`);
+          await stateManager.addToHistory({
+            id: generateId(),
+            timestamp: new Date().toISOString(),
+            presetName: preset!.name,
+            mode: 'separate',
+            files: [fileName],
+            remoteFile: remotePath,
+            result: 'error',
+            errorMessage: message,
+          });
+        } else {
+          statusBar.setIdle(preset?.name);
+        }
+      } finally {
+        await client.disconnect();
+      }
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FileZilla import handler
+// ---------------------------------------------------------------------------
+
+async function handleImportFileZilla(
+  context: vscode.ExtensionContext,
+  presetManager: PresetManager,
+  stateManager: StateManager
+): Promise<void> {
+  const result = await SftpPanel.doFileZillaImport(context, presetManager);
+  if (result === null) { return; } // cancelled
+  updateHasPresetsContext(presetManager);
+  SftpPanel.currentPanel?.refreshPresets();
+  const { added, duplicates, skipped, total } = result;
+  vscode.window.showInformationMessage(
+    `SFTP Import: ${added} added, ${duplicates} duplicate${duplicates !== 1 ? 's' : ''}, ${skipped} skipped (of ${total} found).`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extension entry points
+// ---------------------------------------------------------------------------
+
+export function activate(context: vscode.ExtensionContext): void {
+  initLogger(context);
+  log('info', 'SFTP Upload extension activated');
+
+  const presetManager = new PresetManager(context);
+  const stateManager = new StateManager(context);
+
+  const statusBar = createStatusBar(context, presetManager, stateManager);
+
+  updateHasPresetsContext(presetManager);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('sftpUpload.openPanel', (uri?: vscode.Uri) =>
+      SftpPanel.createOrShow(context.extensionUri, context, presetManager, stateManager, (presetName) => {
+        statusBar.setSuccess(presetName);
+        updateHasPresetsContext(presetManager);
+      })
+    ),
+
+    vscode.commands.registerCommand('sftpUpload.quickUpload', (uri?: vscode.Uri) =>
+      void handleQuickUpload(uri, context, presetManager, stateManager, statusBar)
+    ),
+
+    vscode.commands.registerCommand('sftpUpload.importFileZilla', () =>
+      void handleImportFileZilla(context, presetManager, stateManager)
+    ),
+
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('sftpUpload.presets')) {
+        updateHasPresetsContext(presetManager);
+        SftpPanel.currentPanel?.refreshPresets();
+      }
+    })
+  );
+}
+
+export function deactivate(): void {}

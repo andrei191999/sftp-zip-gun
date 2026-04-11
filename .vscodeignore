@@ -1,0 +1,16 @@
+src/
+*.ts
+*.map
+tsconfig.json
+openspec/
+docs/
+spikes/
+.git/
+.vscode/
+
+# Dev-only node_modules — runtime deps (ssh2-sftp-client chain) must be kept
+node_modules/@types/
+node_modules/typescript/
+node_modules/esbuild/
+node_modules/@esbuild/
+node_modules/@vscode/vsce/
