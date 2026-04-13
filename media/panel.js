@@ -22,7 +22,7 @@ let state = {
   folderPath: null,
   uploading: false,
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
-  newPresetNames: new Set(),  // session-only: names added this session (cleared on edit)
+  newPresetNames: {},          // session-only: { [name]: true } for names added this session (cleared on edit)
   logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
   history: [],              // HistoryEntry[]
   showHistory: false,
@@ -33,6 +33,7 @@ let state = {
   selectedPath: null,       // string | null — selected remote path ('__add_new__' = add-path mode)
   addPathValue: '',         // string — text in the "add new path" input
   pendingDeleteName: null,  // string | null — preset name awaiting inline delete confirmation
+  uploadProgressText: null, // string | null — live upload progress shown in log box footer
   // Manage view state
   editingPreset: null,      // PresetMeta | null  (null = adding new)
   showPresetForm: false,
@@ -70,8 +71,12 @@ function pushLog(text, level, category) {
   if (state.logs.length > LOG_CAP) { state.logs.shift(); }
 }
 
-// saveViewState: lightweight, safe to call on every render.
+var _lastSavedMode = null;
+var _lastSavedPresetName = null;
 function saveViewState() {
+  if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }
+  _lastSavedMode = state.mode;
+  _lastSavedPresetName = state.selectedPresetName;
   vscode.setState({ mode: state.mode, selectedPresetName: state.selectedPresetName });
 }
 
@@ -161,16 +166,16 @@ function buildLogBox(container) {
       line.className = 'log-session';
       line.textContent = '\u2500\u2500 ' + entry.text + ' \u2500\u2500';
     } else {
+      var ts = document.createElement('span');
+      ts.className = 'log-ts';
+      ts.textContent = (entry.ts || '') + ' ';
+      line.appendChild(ts);
       if (entry.category) {
         var catSpan = document.createElement('span');
         catSpan.className = 'log-cat log-cat-' + entry.category;
         catSpan.textContent = '[' + entry.category + '] ';
         line.appendChild(catSpan);
       }
-      var ts = document.createElement('span');
-      ts.className = 'log-ts';
-      ts.textContent = (entry.ts || '') + ' ';
-      line.appendChild(ts);
       var txt = document.createElement('span');
       txt.className = 'log-' + entry.level;
       txt.textContent = entry.text;
@@ -178,8 +183,21 @@ function buildLogBox(container) {
     }
     pre.appendChild(line);
   });
+  if (state.uploading && state.uploadProgressText) {
+    var pLine = document.createElement('div');
+    pLine.className = 'log-progress';
+    var pCat = document.createElement('span');
+    pCat.className = 'log-cat log-cat-upload';
+    pCat.textContent = '[upload] ';
+    var pTxt = document.createElement('span');
+    pTxt.textContent = state.uploadProgressText;
+    pLine.appendChild(pCat);
+    pLine.appendChild(pTxt);
+    pre.appendChild(pLine);
+  }
   container.appendChild(pre);
-  pre.scrollTop = pre.scrollHeight;
+  // Defer scroll until the element is in the DOM and fully laid out.
+  requestAnimationFrame(function () { pre.scrollTop = pre.scrollHeight; });
   return pre;
 }
 
@@ -191,7 +209,11 @@ function renderLogFilterBar(container) {
   var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
   var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
   allBtn.addEventListener('click', function () {
-    CATS.forEach(function (c) { state.logFilter.add(c); });
+    if (allActive) {
+      CATS.forEach(function (c) { state.logFilter.delete(c); });
+    } else {
+      CATS.forEach(function (c) { state.logFilter.add(c); });
+    }
     render();
   });
   bar.appendChild(allBtn);
@@ -240,13 +262,15 @@ window.addEventListener('message', function (event) {
     }
 
     case 'uploadProgress': {
-      // Progress is shown in the VS Code notification — keep the log box clean.
+      var p = msg.payload;
+      state.uploadProgressText = (p.currentFile ? p.currentFile + ' \u2014 ' : '') + p.percent + '%';
       break;
     }
 
     case 'uploadDone': {
       var p = msg.payload;
       state.uploading = false;
+      state.uploadProgressText = null;
       var bytesInfo = p.bytesTransferred > 0 ? ' \u00b7 ' + formatBytes(p.bytesTransferred) : '';
       pushLog('Complete \u2192 ' + p.remoteFile + bytesInfo, 'success', 'upload');
       break;
@@ -255,6 +279,7 @@ window.addEventListener('message', function (event) {
     case 'uploadError': {
       var p = msg.payload;
       state.uploading = false;
+      state.uploadProgressText = null;
       pushLog(p.message, 'error', 'upload');
       break;
     }
@@ -277,16 +302,13 @@ window.addEventListener('message', function (event) {
 
     case 'presetSaved': {
       var saved = msg.payload.preset;
-      // Detect new preset before updating the list
-      var existedBefore = state.presets.some(function (p) {
-        return p.name === saved.name || (msg.payload.originalName && p.name === msg.payload.originalName);
-      });
       // Remove old entry by original name if it exists (handles rename)
       state.presets = state.presets.filter(function (p) { return p.name === saved.name || !msg.payload.originalName || p.name !== msg.payload.originalName; });
       var idx = state.presets.findIndex(function (p) { return p.name === saved.name; });
       if (idx >= 0) { state.presets[idx] = saved; }
       else { state.presets.push(saved); }
-      if (!existedBefore) { state.newPresetNames.add(saved.name); }
+      // isNew comes from the host — reliable even when a 'presets' refresh arrives first
+      if (msg.payload.isNew) { state.newPresetNames[saved.name] = true; }
       state.selectedPresetName = saved.name;
       state.showPresetForm = false;
       state.editingPreset = null;
@@ -339,12 +361,9 @@ window.addEventListener('message', function (event) {
     }
 
     case 'folderPinned': {
-      var p = msg.payload;
-      var pr = state.presets.find(function (x) { return x.name === p.presetName; });
-      if (pr) { pr.remoteDir = p.remotePath; }
+      // preset data refreshed by the preceding 'presets' message from refreshPresets()
       state.remoteBrowse = null;
       state.remoteBrowseCtx = null;
-      // Switch back to default (which was just updated)
       state.selectedPath = null;
       state.addPathValue = '';
       break;
@@ -354,6 +373,8 @@ window.addEventListener('message', function (event) {
       var p = msg.payload;
       state.presets = p.presets;
       state.importPending = false;
+      // newPresetNames comes from the host — reliable even when 'presets' refreshes arrive first
+      (p.newPresetNames || []).forEach(function (name) { state.newPresetNames[name] = true; });
       pushLog('FileZilla import: ' + p.added + ' added, ' + p.duplicates + ' duplicate(s), ' + p.skipped + ' skipped (of ' + p.total + ' found).', 'info', 'import');
       // Auto-test all presets that don't already have a status
       p.presets.forEach(function (pr) {
@@ -367,7 +388,25 @@ window.addEventListener('message', function (event) {
 
     case 'log': {
       var p = msg.payload;
-      pushLog(p.text, p.level === 'error' ? 'error' : p.level === 'warn' ? 'warn' : 'info', 'sys');
+      var lvl = p.level === 'error' ? 'error' : p.level === 'warn' ? 'warn' : 'info';
+      var cat = p.category || 'sys';
+      if (p.replace && state.logs.length > 0) {
+        // Find the last entry with the same category so an interleaved entry
+        // from a different category (e.g. a cancel message) is not overwritten.
+        // If no same-category entry exists, push a new entry instead of replacing
+        // an unrelated one (which would be the old buggy behaviour).
+        var targetIdx = -1;
+        for (var ri = state.logs.length - 1; ri >= 0; ri--) {
+          if (state.logs[ri].category === cat) { targetIdx = ri; break; }
+        }
+        if (targetIdx >= 0) {
+          state.logs[targetIdx] = { level: lvl, text: p.text, ts: nowHHMMSS(), category: cat };
+        } else {
+          pushLog(p.text, lvl, cat);
+        }
+      } else {
+        pushLog(p.text, lvl, cat);
+      }
       break;
     }
 
@@ -382,11 +421,13 @@ window.addEventListener('message', function (event) {
 // ---------------------------------------------------------------------------
 
 function render() {
+  var scrollY = window.scrollY || 0;
   var app = document.getElementById('app');
   if (!app) { return; }
 
   if (state.remoteBrowse !== null) {
     renderRemoteBrowseOverlay(app);
+    window.scrollTo(0, scrollY);
     return;
   }
 
@@ -397,6 +438,7 @@ function render() {
   }
 
   saveViewState();
+  window.scrollTo(0, scrollY);
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +457,8 @@ function renderUploadView(app) {
   state.presets.forEach(function (p) {
     var opt = document.createElement('option');
     opt.value = p.name;
-    opt.textContent = (p.readOnly ? '\uD83D\uDD12 ' : '') + p.name;
+    var connFail = state.connectionStatus[p.name] === 'fail';
+    opt.textContent = (connFail ? '\u26A0 ' : '') + (p.readOnly ? '\uD83D\uDD12 ' : '') + p.name;
     if (p.name === state.selectedPresetName) { opt.selected = true; }
     select.appendChild(opt);
   });
@@ -521,15 +564,14 @@ function renderUploadView(app) {
   rowFolder.appendChild(changeFolderBtn);
   app.appendChild(rowFolder);
 
-  // ---- Mode toggle group — two buttons side by side ----
+  // ---- Mode toggle — single button, click anywhere to switch ----
   var rowMode = el('div', { className: 'row' });
   rowMode.appendChild(el('label', null, 'Mode'));
-  var toggleGroup = el('div', { className: 'toggle-group' });
-  var zipBtn = el('button', { className: state.mode === 'zip' ? '' : 'secondary' }, 'ZIP bundle');
-  var sepBtn = el('button', { className: state.mode === 'separate' ? '' : 'secondary' }, 'Separate files');
-  toggleGroup.appendChild(zipBtn);
-  toggleGroup.appendChild(sepBtn);
-  rowMode.appendChild(toggleGroup);
+  var modeBtn = document.createElement('button');
+  modeBtn.className = 'mode-toggle';
+  modeBtn.appendChild(el('span', { className: 'mode-half' + (state.mode === 'zip' ? ' active' : '') }, 'ZIP bundle'));
+  modeBtn.appendChild(el('span', { className: 'mode-half' + (state.mode === 'separate' ? ' active' : '') }, 'Separate files'));
+  rowMode.appendChild(modeBtn);
   app.appendChild(rowMode);
 
   // ---- File list section ----
@@ -550,16 +592,16 @@ function renderUploadView(app) {
     fileListContainer = el('div', { id: 'file-list' });
     rowFileList.appendChild(fileListContainer);
     sectionFiles.appendChild(rowFileList);
-    buildFileList(fileListContainer, '');
+    buildFileTable(fileListContainer, '');
   }
   app.appendChild(sectionFiles);
 
   // ---- ZIP name row ----
+  var anchorBase = (state.anchorFile || '').replace(/\\/g, '/').split('/').pop() || '';
+  var anchorStem = anchorBase.includes('.') ? anchorBase.slice(0, anchorBase.lastIndexOf('.')) : anchorBase;
   var sectionZip = el('div', { id: 'section-zipname' });
   var zipNameInput = null;
   if (state.mode === 'zip' && state.anchorFile) {
-    var anchorBase = state.anchorFile.replace(/\\/g, '/').split('/').pop() || '';
-    var anchorStem = anchorBase.includes('.') ? anchorBase.slice(0, anchorBase.lastIndexOf('.')) : anchorBase;
     var rowZip = el('div', { className: 'row' });
     rowZip.appendChild(el('label', null, 'Archive name'));
     zipNameInput = document.createElement('input');
@@ -674,11 +716,10 @@ function renderUploadView(app) {
     vscode.postMessage({ kind: 'pickFolder' });
   });
 
-  zipBtn.addEventListener('click', function () {
-    if (state.mode !== 'zip') { state.mode = 'zip'; persistState(); render(); }
-  });
-  sepBtn.addEventListener('click', function () {
-    if (state.mode !== 'separate') { state.mode = 'separate'; persistState(); render(); }
+  modeBtn.addEventListener('click', function () {
+    state.mode = state.mode === 'zip' ? 'separate' : 'zip';
+    persistState();
+    render();
   });
 
   if (state.files.length > 0 && fileListContainer) {
@@ -688,7 +729,7 @@ function renderUploadView(app) {
           state.selectedFiles.add(f.name);
         }
       });
-      buildFileList(fileListContainer, fileFilter.value);
+      buildFileTable(fileListContainer, fileFilter.value);
     });
 
     deselectAllBtn.addEventListener('click', function () {
@@ -697,11 +738,11 @@ function renderUploadView(app) {
           state.selectedFiles.delete(f.name);
         }
       });
-      buildFileList(fileListContainer, fileFilter.value);
+      buildFileTable(fileListContainer, fileFilter.value);
     });
 
     fileFilter.addEventListener('input', function () {
-      buildFileList(fileListContainer, fileFilter.value);
+      buildFileTable(fileListContainer, fileFilter.value);
     });
   }
 
@@ -728,8 +769,6 @@ function renderUploadView(app) {
       selectedPaths: [effectivePath],
     };
     if (state.mode === 'zip' && state.anchorFile) {
-      var anchorBase = state.anchorFile.replace(/\\/g, '/').split('/').pop() || '';
-      var anchorStem = anchorBase.includes('.') ? anchorBase.slice(0, anchorBase.lastIndexOf('.')) : anchorBase;
       payload.archiveName = state.zipBaseName || anchorStem;
     }
     state.uploading = true;
@@ -740,6 +779,7 @@ function renderUploadView(app) {
 
   stopBtn.addEventListener('click', function () {
     vscode.postMessage({ kind: 'cancel' });
+    render();
   });
 
   historyBtn.addEventListener('click', function () {
@@ -748,15 +788,32 @@ function renderUploadView(app) {
   });
 }
 
-function buildFileList(container, filterStr) {
+function buildFileTable(container, filterStr) {
   clearEl(container);
   var filter = (filterStr || '').toLowerCase();
-  state.files.forEach(function (f) {
-    if (f.isDirectory) { return; }
-    if (filter && !f.name.toLowerCase().includes(filter)) { return; }
+  var visible = state.files.filter(function (f) {
+    if (f.isDirectory) { return false; }
+    if (filter && !f.name.toLowerCase().includes(filter)) { return false; }
+    return true;
+  });
+  if (visible.length === 0) { return; }
+
+  var wrap = el('div', { className: 'file-table-wrap' });
+  var table = el('table', { className: 'file-table' });
+
+  var thead = document.createElement('thead');
+  var hrow = document.createElement('tr');
+  hrow.appendChild(el('th', null, ''));
+  hrow.appendChild(el('th', null, 'File (' + visible.length + ')'));
+  thead.appendChild(hrow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  visible.forEach(function (f) {
     var anchor = isAnchorFile(f.name);
-    var lbl = document.createElement('label');
-    lbl.style.display = 'block';
+    var tr = document.createElement('tr');
+
+    var tdCb = document.createElement('td');
     var cb = document.createElement('input');
     cb.type = 'checkbox';
     if (anchor) {
@@ -769,13 +826,19 @@ function buildFileList(container, filterStr) {
         else            { state.selectedFiles.delete(f.name); }
       });
     }
-    lbl.appendChild(cb);
-    var nameSpan = document.createElement('span');
-    nameSpan.textContent = ' ' + f.name + (anchor ? ' (anchor)' : '');
-    if (anchor) { nameSpan.style.fontWeight = 'bold'; }
-    lbl.appendChild(nameSpan);
-    container.appendChild(lbl);
+    tdCb.appendChild(cb);
+    tr.appendChild(tdCb);
+
+    var tdName = document.createElement('td');
+    tdName.textContent = f.name + (anchor ? ' (anchor)' : '');
+    if (anchor) { tdName.style.fontWeight = 'bold'; }
+    tr.appendChild(tdName);
+
+    tbody.appendChild(tr);
   });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  container.appendChild(wrap);
 }
 
 function buildHistory(container) {
@@ -953,25 +1016,24 @@ function renderManageView(app) {
   state.presets.forEach(function (p) {
     var card = el('div', { className: 'preset-card' });
 
-    var headerDiv = el('div');
-    var nameStrong = el('strong', null, p.name);
-    headerDiv.appendChild(nameStrong);
+    var headerDiv = el('div', { style: 'display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;' });
+    headerDiv.appendChild(el('strong', null, p.name));
     if (p.readOnly) {
-      var badge = el('span', { className: 'badge-readonly' }, '\uD83D\uDD12 drop-box');
-      headerDiv.appendChild(badge);
-    }
-    if (state.newPresetNames.has(p.name)) {
-      headerDiv.appendChild(el('span', { className: 'badge-new' }, 'NEW'));
+      headerDiv.appendChild(el('span', { className: 'badge-readonly' }, '\uD83D\uDD12 drop-box'));
     }
 
     // Connection status indicator
     var cs = state.connectionStatus[p.name];
     if (cs === 'pending') {
-      headerDiv.appendChild(el('span', { className: 'spinner', style: 'margin-left:8px;' }, '\u29D7'));
+      headerDiv.appendChild(el('span', { className: 'spinner' }, '\u29D7'));
     } else if (cs === 'ok') {
-      headerDiv.appendChild(el('span', { className: 'conn-ok', style: 'margin-left:8px;' }, '\u2713 Connected'));
+      headerDiv.appendChild(el('span', { className: 'conn-ok' }, '\u2713 Connected'));
     } else if (cs === 'fail') {
-      headerDiv.appendChild(el('span', { className: 'conn-fail', style: 'margin-left:8px;' }, '\u2717 Failed'));
+      headerDiv.appendChild(el('span', { className: 'conn-fail' }, '\u2717 Failed'));
+    }
+
+    if (state.newPresetNames[p.name]) {
+      headerDiv.appendChild(el('span', { className: 'badge-new' }, 'NEW'));
     }
 
     card.appendChild(headerDiv);
@@ -992,7 +1054,7 @@ function renderManageView(app) {
     var editBtn = el('button', { className: 'secondary' }, 'Edit');
     editBtn.addEventListener('click', (function (preset) {
       return function () {
-        state.newPresetNames.delete(preset.name); // clear NEW badge on edit
+        delete state.newPresetNames[preset.name]; // clear NEW badge on edit
         state.editingPreset = preset;
         state.showPresetForm = true;
         state.formAuthType = preset.authType;
@@ -1194,13 +1256,25 @@ function buildPresetForm(container) {
       localSavedPaths.forEach(function (sp, idx) {
         var bmRow = el('div', { style: 'display:flex;align-items:center;gap:4px;margin-bottom:4px;' });
         bmRow.appendChild(el('span', { style: 'flex:1;font-size:0.9em;' }, sp));
+        var setDefaultBmBtn = el('button', { className: 'secondary' }, 'Set as default');
         var removeBtn = el('button', { className: 'secondary' }, '\u2715 Remove');
         (function (i) {
+          setDefaultBmBtn.addEventListener('click', function () {
+            var oldDefault = dirInput.value.trim();
+            var newDefault = localSavedPaths[i];
+            dirInput.value = newDefault;
+            localSavedPaths.splice(i, 1);
+            if (oldDefault && !localSavedPaths.includes(oldDefault)) {
+              localSavedPaths.push(oldDefault);
+            }
+            renderBookmarks();
+          });
           removeBtn.addEventListener('click', function () {
             localSavedPaths.splice(i, 1);
             renderBookmarks();
           });
         }(idx));
+        bmRow.appendChild(setDefaultBmBtn);
         bmRow.appendChild(removeBtn);
         bmContainer.appendChild(bmRow);
       });

@@ -54,7 +54,7 @@ export class SftpClient {
     remotePath: string,
     onProgress: (p: ProgressPayload) => void
   ): Promise<DonePayload> {
-    this.aborted = false;
+    if (this.aborted) { throw new AbortError(); }
     const startTime = Date.now();
     let lastTransferred = 0;
     log('info', `Upload start: "${localPath}" → "${remotePath}"`);
@@ -108,12 +108,35 @@ export class SftpClient {
     }
   }
 
+  get isAborted(): boolean { return this.aborted; }
+
+  /** Set the abort flag only. Used during the zip phase (archiver cannot be
+   *  interrupted) so the upload loop stops cleanly after the zip finishes. */
   abort(): void {
-    log('warn', 'Upload aborted by user');
+    log('warn', 'Upload aborted by user (graceful)');
     this.aborted = true;
-    // Closing the connection causes any in-progress put() to reject immediately.
-    void this.client.end().catch((err) => {
-      log('warn', `Abort disconnect error: ${err instanceof Error ? err.message : String(err)}`);
-    });
+  }
+
+  /** Set the abort flag AND force-destroy the TCP socket. Used during the
+   *  active upload phase to stop put() immediately. The partial remote file
+   *  must be cleaned up by the caller. */
+  forceAbort(): void {
+    log('warn', 'Upload aborted by user (force)');
+    this.aborted = true;
+    try {
+      const sock = (this.client as any).client?._sock;
+      if (sock && typeof sock.destroy === 'function') {
+        sock.destroy();
+      } else {
+        void this.client.end().catch(() => { /* ignore */ });
+      }
+    } catch {
+      void this.client.end().catch(() => { /* ignore */ });
+    }
+  }
+
+  async deleteFile(remotePath: string): Promise<void> {
+    // ssh2-sftp-client has a `delete` method but its bundled types omit it.
+    await (this.client as any).delete(remotePath);
   }
 }

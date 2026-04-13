@@ -58,24 +58,24 @@
       "explorer/context": [
         {
           "command": "sftpUpload.openPanel",
-          "when": "resourceExtname == .xml",
+          "when": "resourceScheme == file",
           "group": "sftp@1"
         },
         {
           "command": "sftpUpload.quickUpload",
-          "when": "resourceExtname == .xml && sftpUpload.hasPresets",
+          "when": "resourceScheme == file && sftpUpload.hasPresets",
           "group": "sftp@2"
         }
       ],
       "editor/context": [
         {
           "command": "sftpUpload.openPanel",
-          "when": "resourceExtname == .xml",
+          "when": "resourceScheme == file",
           "group": "sftp@1"
         },
         {
           "command": "sftpUpload.quickUpload",
-          "when": "resourceExtname == .xml && sftpUpload.hasPresets",
+          "when": "resourceScheme == file && sftpUpload.hasPresets",
           "group": "sftp@2"
         }
       ],

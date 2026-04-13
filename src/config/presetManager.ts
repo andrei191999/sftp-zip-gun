@@ -70,7 +70,7 @@ export class PresetManager {
     return { host, port, username, password };
   }
 
-  async save(req: SavePresetRequest): Promise<void> {
+  async save(req: SavePresetRequest): Promise<PresetMeta> {
     const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
     const existing = this.getAll();
 
@@ -116,6 +116,8 @@ export class PresetManager {
       await this.context.secrets.delete(secretKey(req.originalName, 'password'));
       await this.context.secrets.delete(secretKey(req.originalName, 'passphrase'));
     }
+
+    return safeMeta;
   }
 
   async addSavedPath(presetName: string, remotePath: string): Promise<void> {
