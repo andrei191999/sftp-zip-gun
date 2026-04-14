@@ -2,15 +2,38 @@ src/
 *.ts
 *.map
 tsconfig.json
+tsconfig.jest.json
+jest.config.js
 openspec/
 docs/
 spikes/
+scripts/
 .git/
 .vscode/
+.claude/
+.remember/
+.superpowers/
 
-# Dev-only node_modules — runtime deps (ssh2-sftp-client chain) must be kept
+# Internal / planning files
+CLAUDE.md
+notes.md
+*.vsix
+
+# Large test / binary fixtures
+test-fixtures/
+lib/
+filezilla-small.xml
+
+# Dev-only node_modules (runtime deps of ssh2-sftp-client are kept)
 node_modules/@types/
 node_modules/typescript/
 node_modules/esbuild/
 node_modules/@esbuild/
 node_modules/@vscode/vsce/
+node_modules/jest/
+node_modules/jest-*/
+node_modules/@jest/
+node_modules/ts-jest/
+node_modules/babel-jest/
+node_modules/yauzl/
+node_modules/adm-zip/

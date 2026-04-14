@@ -1,4 +1,4 @@
-// panel.js — SFTP Upload webview UI
+// panel.js — SFTP Zip Gun webview UI
 //
 // All user-controlled values (preset names, file names, paths, log text) are inserted
 // exclusively via el.textContent, el.value, or el.setAttribute — never via innerHTML.

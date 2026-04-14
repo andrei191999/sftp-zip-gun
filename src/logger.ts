@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 let _channel: vscode.OutputChannel | undefined;
 
 export function initLogger(context: vscode.ExtensionContext): void {
-  _channel = vscode.window.createOutputChannel('SFTP Upload');
+  _channel = vscode.window.createOutputChannel('SFTP Zip Gun');
   context.subscriptions.push(_channel);
 }
 

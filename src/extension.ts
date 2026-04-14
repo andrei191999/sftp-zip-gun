@@ -19,13 +19,13 @@ class StatusBar {
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.item.command = 'sftpUpload.openPanel';
-    this.item.tooltip = 'SFTP Upload — click to open panel';
+    this.item.command = 'sftpZipGun.openPanel';
+    this.item.tooltip = 'SFTP Zip Gun — click to open panel';
   }
 
   setIdle(presetName?: string): void {
     this._clearSpinner();
-    this.item.text = presetName ? `$(cloud-upload) ${presetName}` : `$(cloud-upload) SFTP Upload`;
+    this.item.text = presetName ? `$(cloud-upload) ${presetName}` : `$(cloud-upload) SFTP Zip Gun`;
     this.item.show();
   }
 
@@ -81,7 +81,7 @@ function createStatusBar(
 function updateHasPresetsContext(presetManager: PresetManager): void {
   void vscode.commands.executeCommand(
     'setContext',
-    'sftpUpload.hasPresets',
+    'sftpZipGun.hasPresets',
     presetManager.getAll().length > 0
   );
 }
@@ -99,13 +99,13 @@ async function handleQuickUpload(
 ): Promise<void> {
   const uri = commandUri ?? vscode.window.activeTextEditor?.document.uri;
   if (!uri) {
-    vscode.window.showErrorMessage('SFTP Upload: No file selected.');
+    vscode.window.showErrorMessage('SFTP Zip Gun: No file selected.');
     return;
   }
 
   const presets = presetManager.getAll();
   if (presets.length === 0) {
-    vscode.window.showErrorMessage('SFTP Upload: No presets configured. Use the Manage panel to add one.');
+    vscode.window.showErrorMessage('SFTP Zip Gun: No presets configured. Use the Manage panel to add one.');
     return;
   }
 
@@ -148,13 +148,13 @@ async function handleQuickUpload(
         });
         statusBar.setSuccess(preset!.name);
         updateHasPresetsContext(presetManager);
-        vscode.window.showInformationMessage(`SFTP Upload: ${fileName} → ${remotePath} (${done.bytesTransferred} bytes)`);
+        vscode.window.showInformationMessage(`SFTP Zip Gun: ${fileName} → ${remotePath} (${done.bytesTransferred} bytes)`);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         const isAbort = err instanceof AbortError;
         if (!isAbort) {
           statusBar.setError();
-          vscode.window.showErrorMessage(`SFTP Upload failed: ${message}`);
+          vscode.window.showErrorMessage(`SFTP Zip Gun upload failed: ${message}`);
           await stateManager.addToHistory({
             id: generateId(),
             timestamp: new Date().toISOString(),
@@ -190,7 +190,7 @@ async function handleImportFileZilla(
   SftpPanel.currentPanel?.refreshPresets();
   const { added, duplicates, skipped, total } = result;
   vscode.window.showInformationMessage(
-    `SFTP Import: ${added} added, ${duplicates} duplicate${duplicates !== 1 ? 's' : ''}, ${skipped} skipped (of ${total} found).`
+    `SFTP Zip Gun Import: ${added} added, ${duplicates} duplicate${duplicates !== 1 ? 's' : ''}, ${skipped} skipped (of ${total} found).`
   );
 }
 
@@ -200,7 +200,7 @@ async function handleImportFileZilla(
 
 export function activate(context: vscode.ExtensionContext): void {
   initLogger(context);
-  log('info', 'SFTP Upload extension activated');
+  log('info', 'SFTP Zip Gun extension activated');
 
   const presetManager = new PresetManager(context);
   const stateManager = new StateManager(context);
@@ -210,23 +210,23 @@ export function activate(context: vscode.ExtensionContext): void {
   updateHasPresetsContext(presetManager);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('sftpUpload.openPanel', (uri?: vscode.Uri) =>
+    vscode.commands.registerCommand('sftpZipGun.openPanel', (uri?: vscode.Uri) =>
       SftpPanel.createOrShow(context.extensionUri, context, presetManager, stateManager, (presetName) => {
         statusBar.setSuccess(presetName);
         updateHasPresetsContext(presetManager);
       })
     ),
 
-    vscode.commands.registerCommand('sftpUpload.quickUpload', (uri?: vscode.Uri) =>
+    vscode.commands.registerCommand('sftpZipGun.quickUpload', (uri?: vscode.Uri) =>
       void handleQuickUpload(uri, context, presetManager, stateManager, statusBar)
     ),
 
-    vscode.commands.registerCommand('sftpUpload.importFileZilla', () =>
+    vscode.commands.registerCommand('sftpZipGun.importFileZilla', () =>
       void handleImportFileZilla(context, presetManager, stateManager)
     ),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('sftpUpload.presets')) {
+      if (e.affectsConfiguration('sftpZipGun.presets')) {
         updateHasPresetsContext(presetManager);
         SftpPanel.currentPanel?.refreshPresets();
       }

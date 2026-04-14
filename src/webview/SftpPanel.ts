@@ -45,8 +45,8 @@ export class SftpPanel {
     }
 
     const panel = vscode.window.createWebviewPanel(
-      'sftpUpload',
-      'SFTP Upload',
+      'sftpZipGun',
+      'SFTP Zip Gun',
       column,
       {
         enableScripts: true,
@@ -59,7 +59,7 @@ export class SftpPanel {
     );
 
     SftpPanel.currentPanel = new SftpPanel(panel, extensionUri, context, presetManager, stateManager, onUploadComplete);
-    log('info', 'SFTP Upload panel opened');
+    log('info', 'SFTP Zip Gun panel opened');
   }
 
   private constructor(
@@ -155,7 +155,7 @@ export class SftpPanel {
   }
 
   dispose(): void {
-    log('info', 'SFTP Upload panel disposed');
+    log('info', 'SFTP Zip Gun panel disposed');
     SftpPanel.currentPanel = undefined;
     this._panel.dispose();
     while (this._disposables.length) {
@@ -504,7 +504,7 @@ export class SftpPanel {
             }
           } else {
             this._post({ kind: 'uploadError', payload: { message } });
-            vscode.window.showErrorMessage(`SFTP Upload failed: ${message}`);
+            vscode.window.showErrorMessage(`SFTP Zip Gun upload failed: ${message}`);
 
             await this._stateManager.addToHistory({
               id: generateId(),

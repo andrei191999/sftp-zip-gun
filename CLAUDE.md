@@ -27,9 +27,9 @@ This is a VS Code extension with a webview panel UI. There are two execution con
 ### Host side (`src/`)
 Runs in Node.js with full VS Code API access.
 
-- **`extension.ts`** — entry point; registers commands (`sftpUpload.openPanel`, `sftpUpload.quickUpload`, `sftpUpload.importFileZilla`), status bar, and wires together the managers.
-- **`logger.ts`** — VS Code OutputChannel logger ("SFTP Upload" panel). Initialized in `activate()` via `initLogger(context)`. Use `log('info'|'warn'|'error', msg)` anywhere in host-side code for developer-visible output.
-- **`config/presetManager.ts`** — reads/writes SFTP presets to VS Code global settings (`sftpUpload.presets`). **Passwords and SSH passphrases are stored exclusively in `context.secrets` (OS keychain), never in settings.** `PresetMeta` is the sanitized struct safe to expose to the webview. Key methods: `getByName(name)`, `resolveConnectOptions(preset)` — **all connect paths must use `resolveConnectOptions`**, which handles password/key/passphrase resolution and key file reading with proper error handling.
+- **`extension.ts`** — entry point; registers commands (`sftpZipGun.openPanel`, `sftpZipGun.quickUpload`, `sftpZipGun.importFileZilla`), status bar, and wires together the managers.
+- **`logger.ts`** — VS Code OutputChannel logger ("SFTP Zip Gun" panel). Initialized in `activate()` via `initLogger(context)`. Use `log('info'|'warn'|'error', msg)` anywhere in host-side code for developer-visible output.
+- **`config/presetManager.ts`** — reads/writes SFTP presets to VS Code global settings (`sftpZipGun.presets`). **Passwords and SSH passphrases are stored exclusively in `context.secrets` (OS keychain), never in settings.** `PresetMeta` is the sanitized struct safe to expose to the webview. Key methods: `getByName(name)`, `resolveConnectOptions(preset)` — **all connect paths must use `resolveConnectOptions`**, which handles password/key/passphrase resolution and key file reading with proper error handling.
 - **`config/stateManager.ts`** — persists UI state (`PanelState`) and upload history (capped at 50 entries) via `context.globalState`.
 - **`config/fileZillaImporter.ts`** — parses FileZilla XML site-manager exports.
 - **`sftp/sftpClient.ts`** — thin wrapper around `ssh2-sftp-client`; supports password and private-key auth, progress callbacks, and abort-by-closing-connection.

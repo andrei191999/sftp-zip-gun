@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { PanelState, HistoryEntry } from '../types/messages';
 
-const STATE_KEY = 'sftpUpload.panelState';
-const HISTORY_KEY = 'sftpUpload.history';
+const STATE_KEY = 'sftpZipGun.panelState';
+const HISTORY_KEY = 'sftpZipGun.history';
 const HISTORY_CAP = 50;
 
 export class StateManager {

@@ -1,119 +1,178 @@
 {
-  "name": "sftp-upload",
-  "displayName": "SFTP Upload",
-  "description": "Upload XML invoices and ZIP bundles to SFTP intake servers without leaving VS Code.",
+  "name": "sftp-zip-gun",
+  "displayName": "SFTP Zip Gun",
+  "description": "Upload files to SFTP servers without leaving VS Code. Manage presets, browse remote directories, and track upload history.",
   "version": "0.1.0",
   "publisher": "am-vs-tools",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andrei191999/sftp-vs-upload"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },
   "main": "./dist/extension.js",
-  "icon": "icon.png",
-  "categories": ["Other"],
-  "keywords": ["sftp", "upload", "ftp", "xml", "intake", "invoice"],
+  "icon": "media/vsc-logo.png",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "sftp",
+    "upload",
+    "ftp",
+    "ssh",
+    "file transfer"
+  ],
   "galleryBanner": {
     "color": "#1e1e2e",
     "theme": "dark"
   },
   "activationEvents": [
-    "onCommand:sftpUpload.openPanel",
-    "onCommand:sftpUpload.quickUpload",
-    "onCommand:sftpUpload.importFileZilla"
+    "onCommand:sftpZipGun.openPanel",
+    "onCommand:sftpZipGun.quickUpload",
+    "onCommand:sftpZipGun.importFileZilla"
   ],
   "scripts": {
     "compile": "esbuild src/extension.ts --bundle --platform=node --external:vscode --external:ssh2-sftp-client --outfile=dist/extension.js --sourcemap",
     "watch": "npm run compile -- --watch",
     "package": "vsce package",
     "typecheck": "tsc --noEmit",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "test": "jest"
   },
   "contributes": {
     "commands": [
       {
-        "command": "sftpUpload.openPanel",
+        "command": "sftpZipGun.openPanel",
         "title": "Open Upload Panel",
-        "category": "SFTP Upload",
+        "category": "SFTP Zip Gun",
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "sftpUpload.quickUpload",
+        "command": "sftpZipGun.quickUpload",
         "title": "Quick Upload",
-        "category": "SFTP Upload",
+        "category": "SFTP Zip Gun",
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "sftpUpload.importFileZilla",
+        "command": "sftpZipGun.importFileZilla",
         "title": "Import Presets from FileZilla…",
-        "category": "SFTP Upload"
+        "category": "SFTP Zip Gun"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "sftpUpload.openPanel",
-          "when": "resourceExtname == .xml",
+          "command": "sftpZipGun.openPanel",
+          "when": "resourceScheme == file",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
-          "command": "sftpUpload.openPanel",
+          "command": "sftpZipGun.openPanel",
           "when": "resourceScheme == file",
           "group": "sftp@1"
         },
         {
-          "command": "sftpUpload.quickUpload",
-          "when": "resourceScheme == file && sftpUpload.hasPresets",
+          "command": "sftpZipGun.quickUpload",
+          "when": "resourceScheme == file && sftpZipGun.hasPresets",
           "group": "sftp@2"
         }
       ],
       "editor/context": [
         {
-          "command": "sftpUpload.openPanel",
+          "command": "sftpZipGun.openPanel",
           "when": "resourceScheme == file",
           "group": "sftp@1"
         },
         {
-          "command": "sftpUpload.quickUpload",
-          "when": "resourceScheme == file && sftpUpload.hasPresets",
+          "command": "sftpZipGun.quickUpload",
+          "when": "resourceScheme == file && sftpZipGun.hasPresets",
           "group": "sftp@2"
         }
       ],
       "commandPalette": [
         {
-          "command": "sftpUpload.quickUpload",
-          "when": "sftpUpload.hasPresets"
+          "command": "sftpZipGun.quickUpload",
+          "when": "sftpZipGun.hasPresets"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "sftpUpload.openPanel",
+        "command": "sftpZipGun.openPanel",
         "key": "ctrl+shift+u",
         "mac": "cmd+shift+u",
-        "when": "resourceExtname == .xml"
+        "when": "resourceScheme == file"
       }
     ],
     "configuration": {
-      "title": "SFTP Upload",
+      "title": "SFTP Zip Gun",
       "properties": {
-        "sftpUpload.presets": {
+        "sftpZipGun.presets": {
           "type": "array",
           "markdownDescription": "Named SFTP presets (non-sensitive fields only). Use the **⚙ Manage** button in the upload panel for a friendlier editor. Passwords are stored in the OS keychain via VS Code SecretStorage.",
           "default": [],
           "items": {
             "type": "object",
-            "required": ["name", "host", "port", "username", "remoteDir", "authType"],
+            "required": [
+              "name",
+              "host",
+              "port",
+              "username",
+              "remoteDir",
+              "authType"
+            ],
             "properties": {
-              "name":      { "type": "string",  "description": "Unique display name for this preset." },
-              "host":      { "type": "string",  "description": "SFTP hostname or IP address." },
-              "port":      { "type": "number",  "default": 22, "description": "SFTP port (default: 22)." },
-              "username":  { "type": "string",  "description": "SFTP username." },
-              "remoteDir": { "type": "string",  "description": "Default (pinned) remote directory for uploads." },
-              "authType":  { "type": "string",  "enum": ["password", "key"], "default": "password", "description": "Authentication method." },
-              "keyPath":   { "type": "string",  "default": "", "description": "Absolute path to SSH private key file (key auth only)." },
-              "readOnly":  { "type": "boolean", "default": false, "markdownDescription": "Drop-box server: upload-only, no `stat`/`delete`/`mkdir`. Enable this for intake servers that reject management operations." },
-              "savedPaths": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Bookmarked remote paths for quick multi-target upload selection." }
+              "name": {
+                "type": "string",
+                "description": "Unique display name for this preset."
+              },
+              "host": {
+                "type": "string",
+                "description": "SFTP hostname or IP address."
+              },
+              "port": {
+                "type": "number",
+                "default": 22,
+                "description": "SFTP port (default: 22)."
+              },
+              "username": {
+                "type": "string",
+                "description": "SFTP username."
+              },
+              "remoteDir": {
+                "type": "string",
+                "description": "Default (pinned) remote directory for uploads."
+              },
+              "authType": {
+                "type": "string",
+                "enum": [
+                  "password",
+                  "key"
+                ],
+                "default": "password",
+                "description": "Authentication method."
+              },
+              "keyPath": {
+                "type": "string",
+                "default": "",
+                "description": "Absolute path to SSH private key file (key auth only)."
+              },
+              "readOnly": {
+                "type": "boolean",
+                "default": false,
+                "markdownDescription": "Drop-box server: upload-only, no `stat`/`delete`/`mkdir`. Enable this for intake servers that reject management operations."
+              },
+              "savedPaths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Bookmarked remote paths for quick multi-target upload selection."
+              }
             }
           }
         }
@@ -127,10 +186,14 @@
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^25.6.0",
-    "@types/vscode": "^1.115.0",
+    "@types/vscode": "^1.74.0",
+    "@types/yauzl": "^2.10.3",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
     "typescript": "^6.0.2"
   }
 }

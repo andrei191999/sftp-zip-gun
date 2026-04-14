@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import type { PresetMeta, SavePresetRequest } from '../types/messages';
 
 const CONFIG_KEY = 'presets';
-const CONFIG_SECTION = 'sftpUpload';
+const CONFIG_SECTION = 'sftpZipGun';
 
 function secretKey(name: string, field: 'password' | 'passphrase'): string {
-  return `sftpUpload.preset.${name}.${field}`;
+  return `sftpZipGun.preset.${name}.${field}`;
 }
 
 export class PresetManager {
