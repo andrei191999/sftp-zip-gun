@@ -6,7 +6,7 @@
   "publisher": "am-vs-tools",
   "repository": {
     "type": "git",
-    "url": "https://github.com/andrei191999/sftp-vs-upload"
+    "url": "https://github.com/andrei191999/sftp-zip-gun"
   },
   "engines": {
     "vscode": "^1.74.0"
