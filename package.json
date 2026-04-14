@@ -3,7 +3,7 @@
   "displayName": "SFTP Zip Gun",
   "description": "Upload files to SFTP servers without leaving VS Code. Manage presets, browse remote directories, and track upload history.",
   "version": "0.1.0",
-  "publisher": "am-vs-tools",
+  "publisher": "AndreiMacovei",
   "repository": {
     "type": "git",
     "url": "https://github.com/andrei191999/sftp-zip-gun"
