@@ -113,7 +113,7 @@ export type HostToWebview =
   | { kind: 'uploadDone';        payload: DonePayload }
   | { kind: 'uploadError';       payload: ErrorPayload }
   | { kind: 'presets';           payload: PresetsPayload }
-  | { kind: 'presetSaved';       payload: { preset: PresetMeta; originalName?: string } }
+  | { kind: 'presetSaved';       payload: { preset: PresetMeta; originalName?: string; isNew: boolean } }
   | { kind: 'presetDeleted';     payload: { name: string } }
   | { kind: 'connectionTested';  payload: ConnectionTestedPayload }
   | { kind: 'history';           payload: { entries: HistoryEntry[] } }
@@ -172,11 +172,14 @@ export interface FileZillaImportedPayload {
   skipped: number;
   total: number;
   presets: PresetMeta[];
+  newPresetNames: string[];
 }
 
 export interface LogPayload {
   level: 'info' | 'warn' | 'error';
   text: string;
+  category?: 'upload' | 'conn' | 'import' | 'accounts' | 'sys';
+  replace?: boolean;   // if true, replace the last log entry in-place (for progress updates)
 }
 
 // ---------------------------------------------------------------------------

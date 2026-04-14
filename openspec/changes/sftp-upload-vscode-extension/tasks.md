@@ -150,3 +150,11 @@ Run these before writing any extension code. Each is a throwaway script in `vs-c
 - [ ] 14.5 Add `"vscode:prepublish": "npm run compile"` to `package.json` scripts so `vsce package` always builds before packaging
 - [ ] 14.6 Run `npx vsce package` — expect clean `.vsix` under 50 MB; install locally with `code --install-extension sftp-upload-0.1.0.vsix` and re-run smoke tests 11.1–11.10
 - [ ] 14.7 Set `publisher` to `am-vs-tools` in `package.json`; run `npx vsce publish`
+
+## 15. UX Improvements (Session 6)
+
+- [ ] 15.1 NEW badge on freshly-added account cards (session-transient `newPresetNames` Set)
+- [ ] 15.2 "Set as default" button rendered inline in the send-to row when a bookmark is selected
+- [ ] 15.3 Mode toggle buttons: `flex: 1` on `.toggle-group` so both buttons fit on one row
+- [ ] 15.4 Log category prefixes `[upload|conn|import|accounts|sys]` in `pushLog` and `buildLogBox`
+- [ ] 15.5 Log filter bar above log box (session-transient `logFilter` Set; session separators always visible)

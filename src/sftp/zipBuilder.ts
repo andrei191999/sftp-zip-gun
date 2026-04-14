@@ -15,7 +15,8 @@ function formatTimestamp(date: Date): string {
 export function buildZip(
   files: string[],
   anchorFile: string,
-  baseName: string
+  baseName: string,
+  onProgress?: (processed: number, total: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const timestamp = formatTimestamp(new Date());
@@ -27,6 +28,12 @@ export function buildZip(
 
     output.on('close', () => resolve(outPath));
     archive.on('error', reject);
+
+    if (onProgress) {
+      archive.on('progress', (p: { entries: { total: number; processed: number } }) => {
+        onProgress(p.entries.processed, p.entries.total);
+      });
+    }
 
     archive.pipe(output);
     for (const file of files) {
