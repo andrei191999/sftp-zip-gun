@@ -421,3 +421,55 @@ h3 {
   font-size: 0.8em;
   padding: 1px 7px;
 }
+
+/* ---------------------------------------------------------------------------
+   Collapsible file source sections
+--------------------------------------------------------------------------- */
+
+.section-header {
+  margin-top: 4px;
+}
+
+.section-toggle {
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+
+.section-body {
+  padding-left: 0;
+  margin-bottom: 4px;
+}
+
+.folder-path-cell {
+  font-size: 0.8em;
+  opacity: 0.6;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-file-row .hover-actions {
+  visibility: hidden;
+  width: 20px;
+}
+
+.source-file-row:hover .hover-actions {
+  visibility: visible;
+}
+
+.hover-icon {
+  cursor: pointer;
+  opacity: 0.6;
+  font-size: 0.9em;
+  padding: 0 4px;
+}
+
+.hover-icon:hover {
+  opacity: 1;
+}

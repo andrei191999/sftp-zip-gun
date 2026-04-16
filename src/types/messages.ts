@@ -64,7 +64,9 @@ export interface HistoryEntry {
   timestamp: string;      // ISO 8601
   presetName: string;
   mode: UploadMode;
-  files: string[];        // local file basenames
+  files: string[];        // local file basenames (existing)
+  folderPath?: string;    // source folder path (new — optional for backwards compat)
+  filePaths?: string[];   // absolute paths parallel to files[] (new — optional)
   remoteFile: string;     // uploaded file path on server
   result: 'success' | 'error';
   errorMessage?: string;
@@ -79,6 +81,7 @@ export interface PanelState {
   lastPresetName?: string;
   mode?: UploadMode;
   anchorFile?: string;
+  sectionCollapsed?: { recent: boolean; open: boolean; local: boolean };
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +104,10 @@ export type WebviewToHost =
   | { kind: 'setState';         payload: PanelState }
   | { kind: 'browseRemoteDir';  payload: { presetName: string; path: string } }
   | { kind: 'pinFolder';        payload: { presetName: string; remotePath: string } }
-  | { kind: 'bookmarkPath';     payload: { presetName: string; remotePath: string } };
+  | { kind: 'bookmarkPath';     payload: { presetName: string; remotePath: string } }
+  | { kind: 'getOpenFiles' }
+  | { kind: 'openFileInEditor'; payload: { filePath: string } }
+  | { kind: 'switchFolder';     payload: { folderPath: string } };
 
 // ---------------------------------------------------------------------------
 // Host → Webview messages
@@ -121,6 +127,7 @@ export type HostToWebview =
   | { kind: 'remoteDirListed';   payload: RemoteDirListedPayload }
   | { kind: 'folderPinned';      payload: { presetName: string; remotePath: string } }
   | { kind: 'fileZillaImported'; payload: FileZillaImportedPayload }
+  | { kind: 'openFiles';         payload: { files: { path: string; name: string }[] } }
   | { kind: 'log';               payload: LogPayload };
 
 // ---------------------------------------------------------------------------
