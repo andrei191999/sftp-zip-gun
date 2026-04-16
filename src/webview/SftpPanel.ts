@@ -368,7 +368,7 @@ export class SftpPanel {
         // still resets state, disconnects the client, and posts uploadError.
         try {
           // ── ZIP phase ───────────────────────────────────────────────────────
-          if (mode === 'zip') {
+          if (mode === 'zip_canon') {
             const stem = archiveName ?? path.basename(anchorFile, path.extname(anchorFile));
             this._post({ kind: 'log', payload: { level: 'info', text: `Building ZIP archive\u2026 (${files.length} file${files.length === 1 ? '' : 's'})`, category: 'sys' } });
             progress.report({ message: `Building ZIP\u2026 (${files.length} files)` });
