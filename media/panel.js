@@ -257,12 +257,12 @@ window.addEventListener('message', function (event) {
           .filter(function (f) { return !f.isDirectory; })
           .map(function (f) { return folder ? folder + '/' + f.name : f.name; })
       );
-      // Auto-detect anchor as the first XML file in the listing
-      var xml = p.files.find(function (f) {
-        return !f.isDirectory && f.name.toLowerCase().endsWith('.xml');
-      });
-      if (xml) {
-        state.anchorFile = (folder ? folder + '/' : '') + xml.name;
+      var sortedFiles = p.files
+        .filter(function (f) { return !f.isDirectory; })
+        .slice()
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+      if (sortedFiles.length > 0) {
+        state.anchorFile = (folder ? folder + '/' : '') + sortedFiles[0].name;
       }
       persistState();
       break;
@@ -900,6 +900,9 @@ function buildFileTable(container, filterStr) {
   var hrow = document.createElement('tr');
   hrow.appendChild(el('th', null, ''));
   hrow.appendChild(el('th', null, 'File (' + visible.length + ')'));
+  if (state.mode === 'zip_canon') {
+    hrow.appendChild(el('th', null, ''));
+  }
   thead.appendChild(hrow);
   table.appendChild(thead);
 
@@ -930,9 +933,32 @@ function buildFileTable(container, filterStr) {
     tr.appendChild(tdCb);
 
     var tdName = document.createElement('td');
-    tdName.textContent = f.name + (anchor ? ' (anchor)' : '');
-    if (anchor) { tdName.style.fontWeight = 'bold'; }
+    tdName.textContent = f.name;
     tr.appendChild(tdName);
+
+    // Pin icon cell — only in ZIP Canon mode
+    if (state.mode === 'zip_canon') {
+      var tdPin = document.createElement('td');
+      tdPin.className = 'pin-cell';
+      var pinSpan = document.createElement('span');
+      pinSpan.textContent = '\u26b2'; // ⚲
+      pinSpan.title = anchor ? 'Current anchor' : 'Set as anchor';
+      if (anchor) {
+        pinSpan.className = 'pin-icon pin-icon-active';
+      } else {
+        pinSpan.className = 'pin-icon pin-icon-hover';
+        (function(ap) {
+          pinSpan.addEventListener('click', function () {
+            state.anchorFile = ap;
+            state.zipBaseName = null;
+            persistState();
+            render();
+          });
+        }(absPath));
+      }
+      tdPin.appendChild(pinSpan);
+      tr.appendChild(tdPin);
+    }
 
     tbody.appendChild(tr);
   });

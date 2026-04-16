@@ -473,3 +473,37 @@ h3 {
 .hover-icon:hover {
   opacity: 1;
 }
+
+/* ---------------------------------------------------------------------------
+   Anchor pin icon in local file table
+--------------------------------------------------------------------------- */
+
+.pin-cell {
+  width: 20px;
+  text-align: center;
+}
+
+.pin-icon {
+  font-size: 0.9em;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+
+.pin-icon-hover {
+  visibility: hidden;
+}
+
+.pin-icon-active {
+  visibility: visible;
+  opacity: 1;
+  cursor: default;
+}
+
+tr:hover .pin-icon-hover {
+  visibility: visible;
+}
+
+.pin-icon:hover {
+  opacity: 1;
+}
