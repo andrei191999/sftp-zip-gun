@@ -7,7 +7,7 @@ function makeEntry(id: string): HistoryEntry {
     id,
     timestamp: new Date().toISOString(),
     presetName: 'preset-a',
-    mode: 'zip',
+    mode: 'zip_canon',
     files: ['file.xml'],
     remoteFile: '/remote/file.zip',
     result: 'success',
@@ -36,11 +36,11 @@ describe('StateManager — setState merging', () => {
   });
 
   it('merges without overwriting unmentioned fields', async () => {
-    await sm.setState({ lastPresetName: 'preset-a', mode: 'zip' });
-    await sm.setState({ mode: 'separate' });
+    await sm.setState({ lastPresetName: 'preset-a', mode: 'zip_canon' });
+    await sm.setState({ mode: 'pistol_file' });
     const state = sm.getState();
     expect(state.lastPresetName).toBe('preset-a');
-    expect(state.mode).toBe('separate');
+    expect(state.mode).toBe('pistol_file');
   });
 });
 

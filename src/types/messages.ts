@@ -28,12 +28,12 @@ export interface SavePresetRequest {
 // Upload types
 // ---------------------------------------------------------------------------
 
-export type UploadMode = 'zip' | 'separate';
+export type UploadMode = 'zip_canon' | 'pistol_file' | 'zip_gun';
 
 export interface UploadRequest {
   mode: UploadMode;
   files: string[];        // absolute local paths
-  anchorFile: string;     // anchor XML path (determines ZIP output dir)
+  anchorFile: string;     // anchor file path (determines ZIP output dir and archive stem)
   presetName: string;
   archiveName?: string;   // zip mode: base name without extension (timestamp appended by host)
   selectedPaths: string[]; // one or more remote directories to upload to

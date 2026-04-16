@@ -16,9 +16,9 @@ let state = {
   selectedPresetName: null,
   lastPresetName: null,
   files: [],                // FileEntry[]
-  anchorFile: null,         // string: absolute path of the anchor XML
+  anchorFile: null,         // string: absolute path of the anchor file
   selectedFiles: new Set(),
-  mode: 'zip',              // 'zip' | 'separate'
+  mode: 'zip_canon',        // 'zip_canon' | 'pistol_file' | 'zip_gun'
   folderPath: null,
   uploading: false,
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
@@ -73,6 +73,7 @@ function pushLog(text, level, category) {
 
 var _lastSavedMode = null;
 var _lastSavedPresetName = null;
+var _updateFileControlsFn = null; // set by renderUploadView; called by buildFileTable checkbox handlers
 function saveViewState() {
   if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }
   _lastSavedMode = state.mode;
@@ -559,32 +560,44 @@ function renderUploadView(app) {
   // ---- Local folder row ----
   var rowFolder = el('div', { className: 'row' });
   rowFolder.appendChild(el('label', null, 'Local folder'));
-  rowFolder.appendChild(el('span', null, state.folderPath || '(none selected)'));
   var changeFolderBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, '\uD83D\uDCC2 Change\u2026');
   rowFolder.appendChild(changeFolderBtn);
+  rowFolder.appendChild(el('span', null, state.folderPath || '(none selected)'));
   app.appendChild(rowFolder);
 
-  // ---- Mode toggle — single button, click anywhere to switch ----
+  // ---- Mode toggle — three-way segmented button ----
   var rowMode = el('div', { className: 'row' });
   rowMode.appendChild(el('label', null, 'Mode'));
   var modeBtn = document.createElement('button');
   modeBtn.className = 'mode-toggle';
-  modeBtn.appendChild(el('span', { className: 'mode-half' + (state.mode === 'zip' ? ' active' : '') }, 'ZIP bundle'));
-  modeBtn.appendChild(el('span', { className: 'mode-half' + (state.mode === 'separate' ? ' active' : '') }, 'Separate files'));
+  var modeSpans = [
+    { value: 'zip_canon',   label: 'ZIP Canon',   title: 'One shot. All bullets zipped into a single archive and uploaded.' },
+    { value: 'pistol_file', label: 'Pistol File', title: 'Each bullet uploaded as its own separate file. No zipping.' },
+    { value: 'zip_gun',     label: 'ZIP Gun',     title: 'Bullets grouped into squads. Each group becomes its own zip, uploaded in sequence.' },
+  ];
+  modeSpans.forEach(function (item) {
+    var span = el('span', { className: 'mode-half' + (state.mode === item.value ? ' active' : ''), title: item.title }, item.label);
+    span.addEventListener('click', function () {
+      state.mode = item.value;
+      persistState();
+      render();
+    });
+    modeBtn.appendChild(span);
+  });
   rowMode.appendChild(modeBtn);
   app.appendChild(rowMode);
 
   // ---- File list section ----
   var sectionFiles = el('div', { id: 'section-files' });
   var fileListContainer = null;
-  var selectAllBtn, deselectAllBtn, fileFilter;
+  var toggleSelectBtn, counterSpan, fileFilter;
   if (state.files.length > 0) {
     var rowFileCtrl = el('div', { className: 'row' });
-    selectAllBtn   = el('button', { className: 'secondary' }, 'Select all');
-    deselectAllBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, 'Deselect all');
-    fileFilter     = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;' });
-    rowFileCtrl.appendChild(selectAllBtn);
-    rowFileCtrl.appendChild(deselectAllBtn);
+    toggleSelectBtn = el('button', { className: 'secondary' }, '');
+    counterSpan     = el('span', { style: 'margin-left:6px;' }, '');
+    fileFilter      = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;' });
+    rowFileCtrl.appendChild(toggleSelectBtn);
+    rowFileCtrl.appendChild(counterSpan);
     rowFileCtrl.appendChild(fileFilter);
     sectionFiles.appendChild(rowFileCtrl);
 
@@ -593,7 +606,25 @@ function renderUploadView(app) {
     rowFileList.appendChild(fileListContainer);
     sectionFiles.appendChild(rowFileList);
     buildFileTable(fileListContainer, '');
+    updateFileControls();
   }
+
+  function updateFileControls() {
+    if (!toggleSelectBtn || !counterSpan) { return; }
+    var selectableCount = state.files.filter(function (f) { return !f.isDirectory && !isAnchorFile(f.name); }).length;
+    var selectedCount   = state.files.filter(function (f) { return !f.isDirectory && !isAnchorFile(f.name) && state.selectedFiles.has(f.name); }).length;
+    var label;
+    if (selectedCount === 0) {
+      label = '\u2611 Select all';
+    } else if (selectedCount === selectableCount) {
+      label = '\u2610 Deselect all';
+    } else {
+      label = '\u229f Select all';
+    }
+    toggleSelectBtn.textContent = label;
+    counterSpan.textContent = selectedCount + ' / ' + selectableCount;
+  }
+  _updateFileControlsFn = updateFileControls;
   app.appendChild(sectionFiles);
 
   // ---- ZIP name row ----
@@ -601,7 +632,7 @@ function renderUploadView(app) {
   var anchorStem = anchorBase.includes('.') ? anchorBase.slice(0, anchorBase.lastIndexOf('.')) : anchorBase;
   var sectionZip = el('div', { id: 'section-zipname' });
   var zipNameInput = null;
-  if (state.mode === 'zip' && state.anchorFile) {
+  if (state.mode === 'zip_canon' && state.anchorFile) {
     var rowZip = el('div', { className: 'row' });
     rowZip.appendChild(el('label', null, 'Archive name'));
     zipNameInput = document.createElement('input');
@@ -620,9 +651,9 @@ function renderUploadView(app) {
 
   // ---- Upload controls ----
   var rowUpload = el('div', { className: 'row' });
-  var uploadBtn = el('button', null, 'Upload');
+  var uploadBtn = el('button', null, 'FIRE');
   uploadBtn.disabled = state.uploading || !state.selectedPresetName || state.files.length === 0;
-  var stopBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, 'Stop');
+  var stopBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, 'HOLD');
   stopBtn.disabled = !state.uploading;
   rowUpload.appendChild(uploadBtn);
   rowUpload.appendChild(stopBtn);
@@ -716,29 +747,17 @@ function renderUploadView(app) {
     vscode.postMessage({ kind: 'pickFolder' });
   });
 
-  modeBtn.addEventListener('click', function () {
-    state.mode = state.mode === 'zip' ? 'separate' : 'zip';
-    persistState();
-    render();
-  });
-
   if (state.files.length > 0 && fileListContainer) {
-    selectAllBtn.addEventListener('click', function () {
-      state.files.forEach(function (f) {
-        if (!f.isDirectory && !isAnchorFile(f.name)) {
-          state.selectedFiles.add(f.name);
-        }
-      });
+    toggleSelectBtn.addEventListener('click', function () {
+      var selectableFiles = state.files.filter(function (f) { return !f.isDirectory && !isAnchorFile(f.name); });
+      var allSelected = selectableFiles.every(function (f) { return state.selectedFiles.has(f.name); });
+      if (allSelected) {
+        selectableFiles.forEach(function (f) { state.selectedFiles.delete(f.name); });
+      } else {
+        selectableFiles.forEach(function (f) { state.selectedFiles.add(f.name); });
+      }
       buildFileTable(fileListContainer, fileFilter.value);
-    });
-
-    deselectAllBtn.addEventListener('click', function () {
-      state.files.forEach(function (f) {
-        if (!isAnchorFile(f.name)) {
-          state.selectedFiles.delete(f.name);
-        }
-      });
-      buildFileTable(fileListContainer, fileFilter.value);
+      updateFileControls();
     });
 
     fileFilter.addEventListener('input', function () {
@@ -768,11 +787,11 @@ function renderUploadView(app) {
       presetName: pr.name,
       selectedPaths: [effectivePath],
     };
-    if (state.mode === 'zip' && state.anchorFile) {
+    if (state.mode === 'zip_canon' && state.anchorFile) {
       payload.archiveName = state.zipBaseName || anchorStem;
     }
     state.uploading = true;
-    pushLog(pr.name + ' \u2014 ' + (state.mode === 'zip' ? 'ZIP' : 'Separate files') + ' upload', 'session');
+    pushLog(pr.name + ' \u2014 ' + (({ zip_canon: 'ZIP Canon', pistol_file: 'Pistol File', zip_gun: 'ZIP Gun' })[state.mode] || state.mode) + ' upload', 'session');
     vscode.postMessage({ kind: 'upload', payload: payload });
     render();
   });
@@ -824,6 +843,7 @@ function buildFileTable(container, filterStr) {
       cb.addEventListener('change', function () {
         if (cb.checked) { state.selectedFiles.add(f.name); }
         else            { state.selectedFiles.delete(f.name); }
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
       });
     }
     tdCb.appendChild(cb);
