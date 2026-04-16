@@ -172,6 +172,7 @@ export class SftpPanel {
         this._post({ kind: 'history', payload: { entries: this._stateManager.getHistory() } });
         const folderToList = state.lastFolder ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (folderToList) { void this._handleListFiles(folderToList); }
+        this._handleGetOpenFiles();
         break;
       }
 
@@ -257,10 +258,42 @@ export class SftpPanel {
         break;
       }
 
+      case 'getOpenFiles': {
+        this._handleGetOpenFiles();
+        break;
+      }
+
+      case 'openFileInEditor': {
+        void vscode.window.showTextDocument(vscode.Uri.file(msg.payload.filePath));
+        break;
+      }
+
+      case 'switchFolder': {
+        void this._handleListFiles(msg.payload.folderPath);
+        break;
+      }
+
       default: {
         assertNever(msg);
       }
     }
+  }
+
+  private _handleGetOpenFiles(): void {
+    const files: { path: string; name: string }[] = [];
+    const seen = new Set<string>();
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (tab.input instanceof vscode.TabInputText) {
+          const uri = tab.input.uri;
+          if (uri.scheme === 'file' && !seen.has(uri.fsPath)) {
+            seen.add(uri.fsPath);
+            files.push({ path: uri.fsPath, name: path.basename(uri.fsPath) });
+          }
+        }
+      }
+    }
+    this._post({ kind: 'openFiles', payload: { files } });
   }
 
   private async _handlePickFolder(): Promise<void> {
@@ -453,6 +486,8 @@ export class SftpPanel {
             presetName: preset.name,
             mode,
             files: uploadedBasenames,
+            folderPath: anchorFile ? path.dirname(anchorFile) : undefined,
+            filePaths: files.length > 0 ? files : undefined,
             remoteFile: finalRemote,
             result: 'success',
           };
