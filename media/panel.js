@@ -33,6 +33,12 @@ let state = {
   remoteBrowseCtx: null,    // 'send-to' | 'form-default' | 'form-bookmark' | null
   importPending: false,     // true while FileZilla import is in progress
   zipBaseName: null,        // string | null — user override for zip base name
+  fileGroups: [],           // [{filePath: string, groupId: number}]
+  groups: [],               // [{id: number, label: string}]
+  nextGroupId: 1,
+  groupNaming: 'anchor',    // 'anchor' | 'base-counter' | 'base-timestamp'
+  namingBase: '',
+  groupAnchors: {},         // { [groupId]: absPath } — per-group anchor
   selectedPath: null,       // string | null — selected remote path ('__add_new__' = add-path mode)
   addPathValue: '',         // string — text in the "add new path" input
   pendingDeleteName: null,  // string | null — preset name awaiting inline delete confirmation
@@ -134,6 +140,35 @@ function isAnchorFile(fileName) {
   if (!state.anchorFile) { return false; }
   var base = state.anchorFile.replace(/\\/g, '/').split('/').pop();
   return base === fileName;
+}
+
+function autoGroupByName() {
+  state.groups = [];
+  state.fileGroups = [];
+  state.groupAnchors = {};
+  state.nextGroupId = 1;
+
+  // Group selected files by filename stem (basename without extension)
+  var stemMap = {};
+  Array.from(state.selectedFiles).forEach(function(fp) {
+    var name = fp.replace(/\\/g, '/').split('/').pop() || fp;
+    var stem = name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+    if (!stemMap[stem]) { stemMap[stem] = []; }
+    stemMap[stem].push(fp);
+  });
+
+  // Create a group for each stem
+  Object.keys(stemMap).sort().forEach(function(stem) {
+    var files = stemMap[stem];
+    var gid = state.nextGroupId++;
+    state.groups.push({ id: gid, label: 'G' + gid });
+    files.forEach(function(fp) {
+      state.fileGroups.push({ filePath: fp, groupId: gid });
+    });
+    // Auto-anchor: first file alphabetically in the group
+    var sortedFiles = files.slice().sort();
+    state.groupAnchors[gid] = sortedFiles[0];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +639,11 @@ function renderUploadView(app) {
   modeSpans.forEach(function (item) {
     var span = el('span', { className: 'mode-half' + (state.mode === item.value ? ' active' : ''), title: item.title }, item.label);
     span.addEventListener('click', function () {
+      if (item.value === 'zip_gun' && state.mode !== 'zip_gun') {
+        autoGroupByName();
+      }
       state.mode = item.value;
+      state.zipBaseName = null;
       persistState();
       render();
     });
@@ -612,6 +651,46 @@ function renderUploadView(app) {
   });
   rowMode.appendChild(modeBtn);
   app.appendChild(rowMode);
+
+  // ---- ZIP Gun naming strategy row ----
+  if (state.mode === 'zip_gun') {
+    var rowNaming = el('div', { className: 'row' });
+    rowNaming.appendChild(el('label', null, 'Naming'));
+    var namingOpts = [
+      { value: 'anchor', label: 'Anchor' },
+      { value: 'base-counter', label: 'Base + Counter' },
+      { value: 'base-timestamp', label: 'Base + Timestamp' },
+    ];
+    var namingGroup = el('div', { style: 'display:flex;gap:12px;flex:1;' });
+    namingOpts.forEach(function(opt) {
+      var lbl = document.createElement('label');
+      lbl.style.cssText = 'display:flex;align-items:center;gap:4px;cursor:pointer;';
+      var radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'groupNaming';
+      radio.value = opt.value;
+      radio.checked = state.groupNaming === opt.value;
+      var optValue = opt.value; // closure
+      radio.addEventListener('change', function() {
+        if (radio.checked) { state.groupNaming = optValue; render(); }
+      });
+      lbl.appendChild(radio);
+      lbl.appendChild(document.createTextNode(opt.label));
+      namingGroup.appendChild(lbl);
+    });
+    rowNaming.appendChild(namingGroup);
+    app.appendChild(rowNaming);
+
+    if (state.groupNaming !== 'anchor') {
+      var rowBase = el('div', { className: 'row' });
+      rowBase.appendChild(el('label', null, 'Base name'));
+      var baseInput = el('input', { type: 'text', placeholder: 'e.g. batch', style: 'flex:1;' });
+      baseInput.value = state.namingBase || '';
+      baseInput.addEventListener('input', function() { state.namingBase = baseInput.value; });
+      rowBase.appendChild(baseInput);
+      app.appendChild(rowBase);
+    }
+  }
 
   // ---- File sections (Recent / Open / Local) ----
   var sectionFiles = el('div', { id: 'section-files' });
@@ -659,6 +738,11 @@ function renderUploadView(app) {
     fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;flex:1;' });
     rowFileCtrl.appendChild(toggleSelectBtn);
     rowFileCtrl.appendChild(counterSpan);
+    var newGroupBtn = null;
+    if (state.mode === 'zip_gun') {
+      newGroupBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, '\u2192 New Group');
+      rowFileCtrl.appendChild(newGroupBtn);
+    }
     rowFileCtrl.appendChild(fileFilter);
     localBody.appendChild(rowFileCtrl);
     fileListContainer = el('div', { id: 'file-list' });
@@ -717,6 +801,18 @@ function renderUploadView(app) {
     sectionZip.appendChild(rowZip);
   }
   app.appendChild(sectionZip);
+
+  // ---- Ungrouped files warning (ZIP Gun mode) ----
+  if (state.mode === 'zip_gun' && state.selectedFiles.size > 0) {
+    var ungroupedCount = Array.from(state.selectedFiles).filter(function(fp) {
+      return !state.fileGroups.find(function(fg) { return fg.filePath === fp; });
+    }).length;
+    if (ungroupedCount > 0) {
+      var warnRow = el('div', { className: 'row group-warning' });
+      warnRow.textContent = ungroupedCount + ' checked file' + (ungroupedCount !== 1 ? 's' : '') + ' have no group and will be excluded.';
+      app.appendChild(warnRow);
+    }
+  }
 
   // ---- Upload controls ----
   var rowUpload = el('div', { className: 'row' });
@@ -842,20 +938,70 @@ function renderUploadView(app) {
     fileFilter.addEventListener('input', function () {
       buildFileTable(fileListContainer, fileFilter.value);
     });
+
+    if (newGroupBtn) {
+      newGroupBtn.addEventListener('click', function() {
+        // Assign all selected-but-ungrouped files to a new group
+        var ungrouped = Array.from(state.selectedFiles).filter(function(fp) {
+          return !state.fileGroups.find(function(fg) { return fg.filePath === fp; });
+        });
+        if (ungrouped.length === 0) { return; }
+        var gid = state.nextGroupId++;
+        state.groups.push({ id: gid, label: 'G' + gid });
+        ungrouped.forEach(function(fp) {
+          state.fileGroups.push({ filePath: fp, groupId: gid });
+        });
+        // Auto-anchor for the new group
+        var sortedUngrouped = ungrouped.slice().sort();
+        state.groupAnchors[gid] = sortedUngrouped[0];
+        buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '');
+      });
+    }
   }
 
   uploadBtn.addEventListener('click', function () {
     var pr = getSelectedPreset();
     if (!pr) { return; }
+
+    var effectivePath = (state.selectedPath !== null && state.selectedPath !== '__add_new__')
+      ? state.selectedPath
+      : (pr.remoteDir || '/');
+
+    if (state.mode === 'zip_gun') {
+      // Build groups payload
+      var groupPayload = state.groups.map(function(g) {
+        var groupFiles = state.fileGroups
+          .filter(function(fg) { return fg.groupId === g.id && state.selectedFiles.has(fg.filePath); })
+          .map(function(fg) { return fg.filePath; })
+          .sort();
+        var anchor = state.groupAnchors[g.id] || groupFiles[0] || '';
+        return { id: g.id, label: g.label, files: groupFiles, anchorFile: anchor };
+      }).filter(function(g) { return g.files.length > 0; });
+
+      if (groupPayload.length === 0) { return; }
+      state.uploading = true;
+      pushLog(pr.name + ' \u2014 ZIP Gun upload (' + groupPayload.length + ' group' + (groupPayload.length !== 1 ? 's' : '') + ')', 'session');
+      vscode.postMessage({
+        kind: 'upload',
+        payload: {
+          mode: 'zip_gun',
+          presetName: pr.name,
+          selectedPaths: [effectivePath],
+          groups: groupPayload,
+          groupNaming: state.groupNaming,
+          namingBase: state.namingBase,
+        }
+      });
+      render();
+      return;
+    }
+
     var filesToUpload = Array.from(state.selectedFiles);
     // Ensure anchor is included (it should already be in selectedFiles, but guard anyway)
     if (state.anchorFile && !state.selectedFiles.has(state.anchorFile)) {
       filesToUpload = [state.anchorFile].concat(filesToUpload);
     }
     var anchorAbs = state.anchorFile || (filesToUpload[0] || '');
-    var effectivePath = (state.selectedPath !== null && state.selectedPath !== '__add_new__')
-      ? state.selectedPath
-      : (pr.remoteDir || '/');
     var payload = {
       mode: state.mode,
       files: filesToUpload,
@@ -900,7 +1046,10 @@ function buildFileTable(container, filterStr) {
   var hrow = document.createElement('tr');
   hrow.appendChild(el('th', null, ''));
   hrow.appendChild(el('th', null, 'File (' + visible.length + ')'));
-  if (state.mode === 'zip_canon') {
+  if (state.mode === 'zip_gun') {
+    hrow.appendChild(el('th', null, 'Group'));
+    hrow.appendChild(el('th', null, ''));
+  } else if (state.mode === 'zip_canon') {
     hrow.appendChild(el('th', null, ''));
   }
   thead.appendChild(hrow);
@@ -936,8 +1085,81 @@ function buildFileTable(container, filterStr) {
     tdName.textContent = f.name;
     tr.appendChild(tdName);
 
+    // Group dropdown cell — zip_gun mode only
+    if (state.mode === 'zip_gun') {
+      var tdGroup = document.createElement('td');
+      var groupSel = document.createElement('select');
+      groupSel.className = 'group-select';
+
+      // Option: ungrouped
+      var ungrpOpt = document.createElement('option');
+      ungrpOpt.value = '';
+      ungrpOpt.textContent = '\u2014'; // —
+      groupSel.appendChild(ungrpOpt);
+
+      // Options: existing groups
+      state.groups.forEach(function(g) {
+        var opt = document.createElement('option');
+        opt.value = String(g.id);
+        opt.textContent = g.label;
+        groupSel.appendChild(opt);
+      });
+
+      // Set current value
+      var currentFg = state.fileGroups.find(function(fg) { return fg.filePath === absPath; });
+      groupSel.value = currentFg ? String(currentFg.groupId) : '';
+
+      // Change handler
+      (function(ap) {
+        groupSel.addEventListener('change', function() {
+          state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== ap; });
+          var gid = parseInt(groupSel.value, 10);
+          if (!isNaN(gid)) {
+            state.fileGroups.push({ filePath: ap, groupId: gid });
+            // Set auto-anchor if group has no anchor yet
+            if (!state.groupAnchors[gid]) {
+              state.groupAnchors[gid] = ap;
+            }
+          }
+          buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '');
+        });
+      }(absPath));
+
+      tdGroup.appendChild(groupSel);
+      tr.appendChild(tdGroup);
+
+      // Color-code row by group
+      if (currentFg) {
+        tr.className = (tr.className ? tr.className + ' ' : '') + 'group-color-' + ((currentFg.groupId - 1) % 8 + 1);
+      }
+
+      // Per-group pin cell
+      var fgForPin = state.fileGroups.find(function(fg) { return fg.filePath === absPath; });
+      if (fgForPin) {
+        var tdPinGun = document.createElement('td');
+        tdPinGun.className = 'pin-cell';
+        var isPinned = state.groupAnchors[fgForPin.groupId] === absPath;
+        var pinSpanGun = document.createElement('span');
+        pinSpanGun.textContent = '\u26b2';
+        pinSpanGun.title = isPinned ? 'Group anchor' : 'Set as group anchor';
+        pinSpanGun.className = isPinned ? 'pin-icon pin-icon-active' : 'pin-icon pin-icon-hover';
+        if (!isPinned) {
+          (function(ap, gid) {
+            pinSpanGun.addEventListener('click', function() {
+              state.groupAnchors[gid] = ap;
+              buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '');
+            });
+          }(absPath, fgForPin.groupId));
+        }
+        tdPinGun.appendChild(pinSpanGun);
+        tr.appendChild(tdPinGun);
+      } else {
+        // Ungrouped — empty pin cell
+        tr.appendChild(document.createElement('td'));
+      }
+
     // Pin icon cell — only in ZIP Canon mode
-    if (state.mode === 'zip_canon') {
+    } else if (state.mode === 'zip_canon') {
       var tdPin = document.createElement('td');
       tdPin.className = 'pin-cell';
       var pinSpan = document.createElement('span');

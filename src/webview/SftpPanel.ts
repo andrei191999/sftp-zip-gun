@@ -402,13 +402,14 @@ export class SftpPanel {
         try {
           // ── ZIP phase ───────────────────────────────────────────────────────
           if (mode === 'zip_canon') {
-            const stem = archiveName ?? path.basename(anchorFile, path.extname(anchorFile));
-            this._post({ kind: 'log', payload: { level: 'info', text: `Building ZIP archive\u2026 (${files.length} file${files.length === 1 ? '' : 's'})`, category: 'sys' } });
-            progress.report({ message: `Building ZIP\u2026 (${files.length} files)` });
+            const stem = archiveName ?? path.basename(anchorFile!, path.extname(anchorFile!));
+            const filesForZip = files ?? [];
+            this._post({ kind: 'log', payload: { level: 'info', text: `Building ZIP archive\u2026 (${filesForZip.length} file${filesForZip.length === 1 ? '' : 's'})`, category: 'sys' } });
+            progress.report({ message: `Building ZIP\u2026 (${filesForZip.length} files)` });
             this._zipping = true;
             let firstZipProgress = true;
             try {
-              const zipPath = await buildZip(files, anchorFile, stem, (processed, total) => {
+              const zipPath = await buildZip(filesForZip, anchorFile!, stem, (processed, total) => {
                 this._post({ kind: 'log', payload: { level: 'info', text: `Zipping\u2026 ${processed}/${total}`, category: 'sys', replace: !firstZipProgress } });
                 const zipMsg = `Building ZIP\u2026 ${processed}/${total}`;
                 progress.report({ message: zipMsg });
@@ -421,10 +422,47 @@ export class SftpPanel {
               this._zipping = false;
               zipPhaseResolve(); // Signals the replacement notification to close.
             }
+          } else if (mode === 'zip_gun') {
+            // zipPhaseResolve() called after ALL groups are zipped (in finally), so that
+            // cancellation during any group's zip correctly triggers the replacement notification.
+            const { groups = [], groupNaming = 'anchor', namingBase = '' } = payload;
+            const totalGroups = groups.length;
+            try {
+              for (let gi = 0; gi < groups.length; gi++) {
+                const group = groups[gi];
+                const groupPrefix = `[Group ${gi + 1}/${totalGroups}] `;
+
+                // Determine zip stem for this group
+                let stem: string;
+                if (groupNaming === 'anchor') {
+                  stem = path.basename(group.anchorFile, path.extname(group.anchorFile));
+                } else if (groupNaming === 'base-counter') {
+                  const pad = String(totalGroups).length;
+                  stem = `${namingBase}_${String(gi + 1).padStart(pad, '0')}`;
+                } else { // base-timestamp
+                  stem = `${namingBase}_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}_${gi + 1}`;
+                }
+
+                this._post({ kind: 'log', payload: { level: 'info', text: `${groupPrefix}Building ZIP (${group.files.length} file${group.files.length === 1 ? '' : 's'})\u2026`, category: 'sys' } });
+                progress.report({ message: `${groupPrefix}Building ZIP\u2026` });
+                this._zipping = true;
+                try {
+                  const zipPath = await buildZip(group.files, group.anchorFile, stem, (processed, total) => {
+                    this._post({ kind: 'log', payload: { level: 'info', text: `${groupPrefix}Zipping\u2026 ${processed}/${total}`, category: 'sys', replace: processed > 1 } });
+                  });
+                  uploadList.push(zipPath);
+                  uploadedBasenames.push(path.basename(zipPath));
+                } finally {
+                  this._zipping = false;
+                }
+              }
+            } finally {
+              zipPhaseResolve(); // signals replacement notification to close after all groups done
+            }
           } else {
             zipPhaseResolve(); // No zip phase — resolve immediately so no notification hangs.
-            uploadList = files;
-            uploadedBasenames = files.map(f => path.basename(f));
+            uploadList = files ?? [];
+            uploadedBasenames = uploadList.map(f => path.basename(f));
           }
 
           // ── Upload phase ──────────────────────────────────────────────────
@@ -487,7 +525,7 @@ export class SftpPanel {
             mode,
             files: uploadedBasenames,
             folderPath: anchorFile ? path.dirname(anchorFile) : undefined,
-            filePaths: files.length > 0 ? files : undefined,
+            filePaths: (files && files.length > 0) ? files : undefined,
             remoteFile: finalRemote,
             result: 'success',
           };

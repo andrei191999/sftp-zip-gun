@@ -30,13 +30,25 @@ export interface SavePresetRequest {
 
 export type UploadMode = 'zip_canon' | 'pistol_file' | 'zip_gun';
 
+export interface FileGroup {
+  id: number;
+  label: string;          // e.g. "G1"
+  files: string[];        // absolute paths
+  anchorFile: string;     // absolute path — user-pinned or first-alphabetically fallback
+}
+
 export interface UploadRequest {
   mode: UploadMode;
-  files: string[];        // absolute local paths
-  anchorFile: string;     // anchor file path (determines ZIP output dir and archive stem)
   presetName: string;
-  archiveName?: string;   // zip mode: base name without extension (timestamp appended by host)
-  selectedPaths: string[]; // one or more remote directories to upload to
+  selectedPaths: string[];
+  // zip_canon and pistol_file:
+  files?: string[];
+  anchorFile?: string;
+  archiveName?: string;
+  // zip_gun:
+  groups?: FileGroup[];
+  groupNaming?: 'anchor' | 'base-counter' | 'base-timestamp';
+  namingBase?: string;
 }
 
 // ---------------------------------------------------------------------------
