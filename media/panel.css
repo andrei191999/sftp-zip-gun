@@ -23,8 +23,21 @@ body {
   gap: 4px;
 }
 
+.row-nowrap {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.file-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
 .row label {
-  min-width: 120px;
+  min-width: 80px;
   display: inline-block;
 }
 
@@ -133,16 +146,16 @@ button.active {
 }
 
 /* Per-mode distinct inactive colors */
-.mode-half-zip-canon:not(.active)   { background-color: rgba(60, 120, 255, 0.25); }
-.mode-half-pistol-file:not(.active) { background-color: rgba(0, 190, 210, 0.4); }
-.mode-half-zip-gun:not(.active)     { background-color: rgba(170, 50, 255, 0.25); }
+.mode-half-zip-canon:not(.active)   { background-color: rgba(40, 120, 255, 0.45); }
+.mode-half-pistol-file:not(.active) { background-color: rgba(0, 190, 180, 0.45); }
+.mode-half-zip-gun:not(.active)     { background-color: rgba(220, 50, 180, 0.45); }
 
 .mode-toggle:hover .mode-half.active {
   background-color: var(--vscode-button-hoverBackground);
 }
 
 .mode-toggle:hover .mode-half:not(.active) {
-  background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
+  filter: brightness(1.2);
 }
 
 /* ---------------------------------------------------------------------------
@@ -518,8 +531,8 @@ h3 {
 
 .hover-icon {
   cursor: pointer;
-  opacity: 0.6;
-  font-size: 0.9em;
+  opacity: 0.7;
+  font-size: 1.1em;
   padding: 0 4px;
 }
 
@@ -537,10 +550,10 @@ h3 {
 }
 
 .pin-icon {
-  font-size: 0.9em;
+  font-size: 1.1em;
   cursor: pointer;
-  opacity: 0.6;
-  padding: 0 2px;
+  opacity: 0.7;
+  padding: 0 3px;
 }
 
 .pin-icon-hover {

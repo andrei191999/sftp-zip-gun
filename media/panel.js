@@ -84,6 +84,7 @@ function pushLog(text, level, category) {
 var _lastSavedMode = null;
 var _lastSavedPresetName = null;
 var _updateFileControlsFn = null; // set by renderUploadView; called by buildFileTable checkbox handlers
+var _fireBtnRef = null;           // set by renderUploadView; updated by updateFireState()
 function saveViewState() {
   if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }
   _lastSavedMode = state.mode;
@@ -509,12 +510,13 @@ function render() {
 
 function renderUploadView(app) {
   // ---- Account row ----
-  var rowDest = el('div', { className: 'row' });
+  var rowDest = el('div', { className: 'row row-nowrap' });
   rowDest.appendChild(el('label', null, 'Account'));
 
   var select = document.createElement('select');
   select.id = 'preset-select';
   select.style.flex = '1';
+  select.style.minWidth = '0';
   state.presets.forEach(function (p) {
     var opt = document.createElement('option');
     opt.value = p.name;
@@ -524,6 +526,8 @@ function renderUploadView(app) {
     if (p.name === state.selectedPresetName) { opt.selected = true; }
     select.appendChild(opt);
   });
+  var _selOpt = select.options[select.selectedIndex];
+  if (_selOpt) { select.title = _selOpt.textContent; }
   rowDest.appendChild(select);
   app.appendChild(rowDest);
 
@@ -536,7 +540,7 @@ function renderUploadView(app) {
   var bookmarkNewBtn = null;
   var useOnceBtn = null;
 
-  var rowSendTo = el('div', { className: 'row' });
+  var rowSendTo = el('div', { className: 'row row-nowrap' });
   rowSendTo.appendChild(el('label', null, 'Send to'));
 
   if (preset) {
@@ -577,6 +581,9 @@ function renderUploadView(app) {
     }
 
     rowSendTo.appendChild(sendToSelect);
+    sendToSelect.style.minWidth = '0';
+    var _sendOpt = sendToSelect.options[sendToSelect.selectedIndex];
+    if (_sendOpt) { sendToSelect.title = _sendOpt.textContent; }
 
     // Inline "Set as default" when a saved bookmark is the active selection
     if (state.selectedPath && state.selectedPath !== '__add_new__') {
@@ -616,7 +623,7 @@ function renderUploadView(app) {
   }
 
   // ---- Local folder row ----
-  var rowFolder = el('div', { className: 'row' });
+  var rowFolder = el('div', { className: 'row row-nowrap' });
   rowFolder.appendChild(el('label', null, 'Local folder'));
   var changeFolderBtn = document.createElement('button');
   changeFolderBtn.className = 'secondary folder-btn';
@@ -694,13 +701,13 @@ function renderUploadView(app) {
   var newGroupBtn = null, clearGroupsBtn = null, resetAllBtn = null;
   if (!state.sectionCollapsed.local && (state.files.length > 0 || openFileRows.length > 0)) {
     var localBody = el('div', { className: 'section-body' });
-    var rowFileCtrl = el('div', { className: 'row' });
+    var rowFileCtrl = el('div', { className: 'file-controls' });
     toggleSelectBtn = el('button', { className: 'secondary' }, '...');
-    counterSpan = el('span', { style: 'margin-left:6px;opacity:0.7;' }, '');
-    resetAllBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, '\u21ba Reset all');
+    counterSpan = el('span', { style: 'opacity:0.7;' }, '');
+    resetAllBtn = el('button', { className: 'secondary' }, '\u21ba Reset all');
     if (state.mode === 'zip_gun') {
-      newGroupBtn = el('button', { className: 'secondary', style: 'margin-left:12px;' }, '\u2192 New Group');
-      clearGroupsBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, '\u00d7 Clear groups');
+      newGroupBtn = el('button', { className: 'secondary' }, '\u2192 New Group');
+      clearGroupsBtn = el('button', { className: 'secondary' }, '\u00d7 Clear groups');
       rowFileCtrl.appendChild(toggleSelectBtn);
       rowFileCtrl.appendChild(counterSpan);
       rowFileCtrl.appendChild(newGroupBtn);
@@ -711,7 +718,7 @@ function renderUploadView(app) {
       rowFileCtrl.appendChild(counterSpan);
       rowFileCtrl.appendChild(resetAllBtn);
     }
-    fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;flex:1;' });
+    fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'flex:1;min-width:120px;' });
     rowFileCtrl.appendChild(fileFilter);
     localBody.appendChild(rowFileCtrl);
     fileListContainer = el('div', { id: 'file-list' });
@@ -724,10 +731,11 @@ function renderUploadView(app) {
     if (!toggleSelectBtn || !counterSpan) { return; }
     var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
     var selectableCount = state.files.filter(function (f) {
-      return !f.isDirectory && !isAnchorFile(f.name);
+      return !f.isDirectory;
     }).length + openFileRows.length;
     var selectedCount = state.files.filter(function (f) {
-      if (f.isDirectory || isAnchorFile(f.name)) { return false; }
+      if (f.isDirectory) { return false; }
+      if (isAnchorFile(f.name)) { return true; }
       var absPath = folder ? folder + '/' + f.name : f.name;
       return state.selectedFiles.has(absPath);
     }).length + openFileRows.filter(function(of) {
@@ -749,6 +757,7 @@ function renderUploadView(app) {
     } else {
       counterSpan.textContent = selectedCount + ' / ' + selectableCount;
     }
+    updateFireState();
   }
   _updateFileControlsFn = updateFileControls;
   if (!state.sectionCollapsed.local && state.files.length > 0) {
@@ -837,6 +846,7 @@ function renderUploadView(app) {
   // ---- Upload controls ----
   var rowUpload = el('div', { className: 'row', style: 'justify-content:center;' });
   var uploadBtn = el('button', { className: 'btn-fire' }, 'FIRE');
+  _fireBtnRef = uploadBtn;
   var noFiles = state.mode === 'zip_gun'
     ? !state.fileGroups.some(function(fg) { return state.selectedFiles.has(fg.filePath); })
     : state.selectedFiles.size === 0;
@@ -943,7 +953,7 @@ function renderUploadView(app) {
   if (!state.sectionCollapsed.local && fileListContainer) {
     toggleSelectBtn.addEventListener('click', function () {
       var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-      var selectableFiles = state.files.filter(function (f) { return !f.isDirectory && !isAnchorFile(f.name); });
+      var selectableFiles = state.files.filter(function (f) { return !f.isDirectory; });
       var allLocalSelected = selectableFiles.every(function (f) {
         var absPath = folder ? folder + '/' + f.name : f.name;
         return state.selectedFiles.has(absPath);
@@ -990,6 +1000,7 @@ function renderUploadView(app) {
         var sortedUngrouped = ungrouped.slice().sort();
         state.groupAnchors[gid] = sortedUngrouped[0];
         buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '', openFileRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
       });
     }
 
@@ -1089,6 +1100,24 @@ function renderUploadView(app) {
     state.showHistory = !state.showHistory;
     render();
   });
+}
+
+function updateFireState() {
+  if (!_fireBtnRef) { return; }
+  var noFiles = state.mode === 'zip_gun'
+    ? !state.fileGroups.some(function(fg) { return state.selectedFiles.has(fg.filePath); })
+    : state.selectedFiles.size === 0;
+  _fireBtnRef.disabled = state.uploading || !state.selectedPresetName || noFiles;
+  if (_fireBtnRef.disabled && !state.uploading) {
+    var hints = [];
+    if (!state.selectedPresetName) { hints.push('no account selected'); }
+    if (noFiles) {
+      hints.push(state.mode === 'zip_gun' ? 'check files and assign to groups' : 'no files selected');
+    }
+    _fireBtnRef.title = hints.join(' \u00b7 ');
+  } else {
+    _fireBtnRef.title = '';
+  }
 }
 
 // openFileRows: optional array of {filePath, fileName, folderPath} — open VS Code tabs not in local folder.
@@ -1237,7 +1266,7 @@ function buildFileTable(container, filterStr, openFileRows) {
     tr.appendChild(tdCb);
 
     // Pin
-    tr.appendChild(buildPinCell(absPath, false));
+    tr.appendChild(buildPinCell(absPath, state.anchorFile === absPath));
 
     // Switch-folder ↗
     var tdSw = document.createElement('td');
