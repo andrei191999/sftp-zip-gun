@@ -17,13 +17,14 @@ let state = {
   lastPresetName: null,
   files: [],                // FileEntry[]
   anchorFile: null,         // string: absolute path of the anchor file
+  modeAnchors: {},          // { [mode]: absPath } — per-mode anchor memory
+  modeSelectedFiles: {},    // { [mode]: Set<string> } — selectedFiles snapshot per non-zip_gun mode
   selectedFiles: new Set(),
-  mode: 'zip_canon',        // 'zip_canon' | 'pistol_file' | 'zip_gun'
+  mode: 'pistol_file',      // 'zip_canon' | 'pistol_file' | 'zip_gun'
   folderPath: null,
   uploading: false,
-  recentFiles: [],          // [{filePath, fileName, folderPath}] derived from history
   openFiles: [],            // [{path, name}] from VS Code open tabs
-  sectionCollapsed: { recent: true, open: true, local: false },
+  sectionCollapsed: { local: false },
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
   newPresetNames: {},          // session-only: { [name]: true } for names added this session (cleared on edit)
   logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
@@ -292,13 +293,6 @@ window.addEventListener('message', function (event) {
           .filter(function (f) { return !f.isDirectory; })
           .map(function (f) { return folder ? folder + '/' + f.name : f.name; })
       );
-      var sortedFiles = p.files
-        .filter(function (f) { return !f.isDirectory; })
-        .slice()
-        .sort(function (a, b) { return a.name.localeCompare(b.name); });
-      if (sortedFiles.length > 0) {
-        state.anchorFile = (folder ? folder + '/' : '') + sortedFiles[0].name;
-      }
       persistState();
       break;
     }
@@ -384,20 +378,6 @@ window.addEventListener('message', function (event) {
 
     case 'history': {
       state.history = msg.payload.entries.slice(0, 50);
-      // Extract last 10 unique file paths from history entries that have filePaths
-      var seenPaths = new Set();
-      state.recentFiles = [];
-      for (var hi = 0; hi < state.history.length && state.recentFiles.length < 10; hi++) {
-        var hEntry = state.history[hi];
-        if (!hEntry.filePaths || !hEntry.folderPath) { continue; }
-        hEntry.filePaths.forEach(function(fp) {
-          if (!seenPaths.has(fp)) {
-            seenPaths.add(fp);
-            var fileName = fp.replace(/\\/g, '/').split('/').pop() || fp;
-            state.recentFiles.push({ filePath: fp, fileName: fileName, folderPath: hEntry.folderPath });
-          }
-        });
-      }
       break;
     }
 
@@ -482,6 +462,23 @@ window.addEventListener('message', function (event) {
 // Main render
 // ---------------------------------------------------------------------------
 
+function renderTabBar(app) {
+  var bar = el('div', { className: 'view-tab-bar' });
+  [
+    { value: 'upload', label: 'Transfer files' },
+    { value: 'manage', label: 'Manage connections' },
+  ].forEach(function (tab) {
+    var t = el('div', { className: 'view-tab' + (state.view === tab.value ? ' active' : '') }, tab.label);
+    t.addEventListener('click', function () {
+      if (state.view === tab.value) { return; }
+      state.view = tab.value;
+      render();
+    });
+    bar.appendChild(t);
+  });
+  app.appendChild(bar);
+}
+
 function render() {
   var scrollY = window.scrollY || 0;
   var app = document.getElementById('app');
@@ -492,6 +489,9 @@ function render() {
     window.scrollTo(0, scrollY);
     return;
   }
+
+  clearEl(app);
+  renderTabBar(app);
 
   if (state.view === 'manage') {
     renderManageView(app);
@@ -508,26 +508,23 @@ function render() {
 // ---------------------------------------------------------------------------
 
 function renderUploadView(app) {
-  clearEl(app);
-
   // ---- Account row ----
   var rowDest = el('div', { className: 'row' });
   rowDest.appendChild(el('label', null, 'Account'));
 
   var select = document.createElement('select');
   select.id = 'preset-select';
+  select.style.flex = '1';
   state.presets.forEach(function (p) {
     var opt = document.createElement('option');
     opt.value = p.name;
     var connFail = state.connectionStatus[p.name] === 'fail';
-    opt.textContent = (connFail ? '\u26A0 ' : '') + (p.readOnly ? '\uD83D\uDD12 ' : '') + p.name;
+    opt.textContent = (connFail ? '\u26A0 ' : '') + (p.readOnly ? '\uD83D\uDD12 ' : '')
+      + p.name + ' \u2014 ' + p.username + ':' + p.host;
     if (p.name === state.selectedPresetName) { opt.selected = true; }
     select.appendChild(opt);
   });
   rowDest.appendChild(select);
-
-  var manageBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, '\u2699 Manage');
-  rowDest.appendChild(manageBtn);
   app.appendChild(rowDest);
 
   // ---- Send to row ----
@@ -621,9 +618,15 @@ function renderUploadView(app) {
   // ---- Local folder row ----
   var rowFolder = el('div', { className: 'row' });
   rowFolder.appendChild(el('label', null, 'Local folder'));
-  var changeFolderBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, '\uD83D\uDCC2 Change\u2026');
+  var changeFolderBtn = document.createElement('button');
+  changeFolderBtn.className = 'secondary folder-btn';
+  changeFolderBtn.title = state.folderPath || '';
+  changeFolderBtn.appendChild(document.createTextNode('\uD83D\uDCC2 '));
+  var _pathSpan = document.createElement('span');
+  _pathSpan.className = 'folder-path-text';
+  _pathSpan.textContent = state.folderPath ? state.folderPath.replace(/\\/g, '/') : 'Change\u2026';
+  changeFolderBtn.appendChild(_pathSpan);
   rowFolder.appendChild(changeFolderBtn);
-  rowFolder.appendChild(el('span', null, state.folderPath || '(none selected)'));
   app.appendChild(rowFolder);
 
   // ---- Mode toggle — three-way segmented button ----
@@ -637,12 +640,27 @@ function renderUploadView(app) {
     { value: 'zip_gun',     label: 'ZIP Gun',     title: 'Bullets grouped into squads. Each group becomes its own zip, uploaded in sequence.' },
   ];
   modeSpans.forEach(function (item) {
-    var span = el('span', { className: 'mode-half' + (state.mode === item.value ? ' active' : ''), title: item.title }, item.label);
+    var modeSlug = item.value.replace(/_/g, '-');
+    var span = el('span', { className: 'mode-half mode-half-' + modeSlug + (state.mode === item.value ? ' active' : ''), title: item.title }, item.label);
     span.addEventListener('click', function () {
+      if (item.value === state.mode) { return; }
+      // Save anchor for the mode we're leaving, restore for the mode we're entering
+      state.modeAnchors[state.mode] = state.anchorFile;
       if (item.value === 'zip_gun' && state.mode !== 'zip_gun') {
-        autoGroupByName();
+        // Save canon/pistol selectedFiles so they survive the round-trip through zip_gun
+        state.modeSelectedFiles[state.mode] = new Set(state.selectedFiles);
+        state.selectedFiles.clear();
+        state.groups       = [];
+        state.fileGroups   = [];
+        state.groupAnchors = {};
+        state.nextGroupId  = 1;
+      } else if (state.mode === 'zip_gun' && item.value !== 'zip_gun') {
+        // Restore the target mode's previously saved files
+        var saved = state.modeSelectedFiles[item.value];
+        if (saved) { state.selectedFiles = new Set(saved); }
       }
       state.mode = item.value;
+      state.anchorFile = state.modeAnchors[item.value] || null;
       state.zipBaseName = null;
       persistState();
       render();
@@ -652,7 +670,94 @@ function renderUploadView(app) {
   rowMode.appendChild(modeBtn);
   app.appendChild(rowMode);
 
-  // ---- ZIP Gun naming strategy row ----
+  // ---- File sections (Open files merged with Local folder, shared search) ----
+  var localFolderNorm = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+  // Open files not already in the local folder
+  var openFileRows = state.openFiles
+    .filter(function(of) {
+      var ofFolderNorm = (of.path || '').replace(/\\/g, '/').replace(/\/[^/]+$/, '');
+      return ofFolderNorm !== localFolderNorm;
+    })
+    .map(function(of) {
+      var ofFolder = of.path.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
+      return { filePath: of.path, fileName: of.name, folderPath: ofFolder };
+    });
+
+  var localFileCount = state.files.filter(function(f){ return !f.isDirectory; }).length;
+  var totalFileCount = localFileCount + openFileRows.length;
+  var localLabel = 'Files' + (state.folderPath ? ' \u2014 ' + (state.folderPath || '').replace(/\\/g, '/').split('/').pop() : '');
+  var sectionFiles = el('div', { id: 'section-files' });
+  sectionFiles.appendChild(buildCollapsibleHeader('local', localLabel, totalFileCount));
+
+  var fileListContainer = null;
+  var toggleSelectBtn = null, counterSpan = null, fileFilter = null;
+  var newGroupBtn = null, clearGroupsBtn = null, resetAllBtn = null;
+  if (!state.sectionCollapsed.local && (state.files.length > 0 || openFileRows.length > 0)) {
+    var localBody = el('div', { className: 'section-body' });
+    var rowFileCtrl = el('div', { className: 'row' });
+    toggleSelectBtn = el('button', { className: 'secondary' }, '...');
+    counterSpan = el('span', { style: 'margin-left:6px;opacity:0.7;' }, '');
+    resetAllBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, '\u21ba Reset all');
+    if (state.mode === 'zip_gun') {
+      newGroupBtn = el('button', { className: 'secondary', style: 'margin-left:12px;' }, '\u2192 New Group');
+      clearGroupsBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, '\u00d7 Clear groups');
+      rowFileCtrl.appendChild(toggleSelectBtn);
+      rowFileCtrl.appendChild(counterSpan);
+      rowFileCtrl.appendChild(newGroupBtn);
+      rowFileCtrl.appendChild(clearGroupsBtn);
+      rowFileCtrl.appendChild(resetAllBtn);
+    } else {
+      rowFileCtrl.appendChild(toggleSelectBtn);
+      rowFileCtrl.appendChild(counterSpan);
+      rowFileCtrl.appendChild(resetAllBtn);
+    }
+    fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;flex:1;' });
+    rowFileCtrl.appendChild(fileFilter);
+    localBody.appendChild(rowFileCtrl);
+    fileListContainer = el('div', { id: 'file-list' });
+    localBody.appendChild(fileListContainer);
+    buildFileTable(fileListContainer, '', openFileRows);
+    sectionFiles.appendChild(localBody);
+  }
+
+  function updateFileControls() {
+    if (!toggleSelectBtn || !counterSpan) { return; }
+    var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+    var selectableCount = state.files.filter(function (f) {
+      return !f.isDirectory && !isAnchorFile(f.name);
+    }).length + openFileRows.length;
+    var selectedCount = state.files.filter(function (f) {
+      if (f.isDirectory || isAnchorFile(f.name)) { return false; }
+      var absPath = folder ? folder + '/' + f.name : f.name;
+      return state.selectedFiles.has(absPath);
+    }).length + openFileRows.filter(function(of) {
+      return state.selectedFiles.has(of.filePath);
+    }).length;
+    var label;
+    if (selectedCount === 0) {
+      label = '\u2611 Select all';
+    } else if (selectedCount === selectableCount) {
+      label = '\u2610 Deselect all';
+    } else {
+      label = '\u229f Select all';
+    }
+    toggleSelectBtn.textContent = label;
+    if (state.mode === 'zip_gun') {
+      var assignedCount = state.fileGroups.filter(function(fg) { return state.selectedFiles.has(fg.filePath); }).length;
+      var gc = state.groups.length;
+      counterSpan.textContent = assignedCount + '/' + selectableCount + ' in ' + gc + ' group' + (gc !== 1 ? 's' : '');
+    } else {
+      counterSpan.textContent = selectedCount + ' / ' + selectableCount;
+    }
+  }
+  _updateFileControlsFn = updateFileControls;
+  if (!state.sectionCollapsed.local && state.files.length > 0) {
+    updateFileControls();
+  }
+
+  app.appendChild(sectionFiles);
+
+  // ---- ZIP Gun naming strategy row (placed after file list) ----
   if (state.mode === 'zip_gun') {
     var rowNaming = el('div', { className: 'row' });
     rowNaming.appendChild(el('label', null, 'Naming'));
@@ -670,7 +775,7 @@ function renderUploadView(app) {
       radio.name = 'groupNaming';
       radio.value = opt.value;
       radio.checked = state.groupNaming === opt.value;
-      var optValue = opt.value; // closure
+      var optValue = opt.value;
       radio.addEventListener('change', function() {
         if (radio.checked) { state.groupNaming = optValue; render(); }
       });
@@ -692,106 +797,18 @@ function renderUploadView(app) {
     }
   }
 
-  // ---- File sections (Recent / Open / Local) ----
-  var sectionFiles = el('div', { id: 'section-files' });
-
-  // ---- Recent files sub-section ----
-  var localFolderNorm = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-  var visibleRecent = state.recentFiles.filter(function(rf) {
-    var rfFolderNorm = (rf.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-    return rfFolderNorm !== localFolderNorm;
-  });
-  sectionFiles.appendChild(buildCollapsibleHeader('recent', 'Recent files', visibleRecent.length));
-  if (!state.sectionCollapsed.recent && visibleRecent.length > 0) {
-    var recentBody = el('div', { className: 'section-body' });
-    buildSourceFileTable(recentBody, visibleRecent.map(function(rf) {
-      return { filePath: rf.filePath, fileName: rf.fileName, folderPath: rf.folderPath };
-    }));
-    sectionFiles.appendChild(recentBody);
-  }
-
-  // ---- Open files sub-section ----
-  var visibleOpen = state.openFiles.filter(function(of) {
-    var ofFolderNorm = (of.path || '').replace(/\\/g, '/').replace(/\/[^/]+$/, '');
-    return ofFolderNorm !== localFolderNorm;
-  });
-  sectionFiles.appendChild(buildCollapsibleHeader('open', 'Open files', visibleOpen.length));
-  if (!state.sectionCollapsed.open && visibleOpen.length > 0) {
-    var openBody = el('div', { className: 'section-body' });
-    buildSourceFileTable(openBody, visibleOpen.map(function(of) {
-      var ofFolder = of.path.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
-      return { filePath: of.path, fileName: of.name, folderPath: ofFolder };
-    }));
-    sectionFiles.appendChild(openBody);
-  }
-
-  // ---- Local folder sub-section ----
-  var localLabel = 'Local folder' + (state.folderPath ? ' \u2014 ' + (state.folderPath || '').replace(/\\/g, '/').split('/').pop() : '');
-  sectionFiles.appendChild(buildCollapsibleHeader('local', localLabel, state.files.filter(function(f){ return !f.isDirectory; }).length));
-  var fileListContainer = null;
-  var toggleSelectBtn = null, counterSpan = null, fileFilter = null;
-  if (!state.sectionCollapsed.local && state.files.length > 0) {
-    var localBody = el('div', { className: 'section-body' });
-    var rowFileCtrl = el('div', { className: 'row' });
-    toggleSelectBtn = el('button', { className: 'secondary' }, '...');
-    counterSpan = el('span', { style: 'margin-left:6px;opacity:0.7;' }, '');
-    fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;flex:1;' });
-    rowFileCtrl.appendChild(toggleSelectBtn);
-    rowFileCtrl.appendChild(counterSpan);
-    var newGroupBtn = null;
-    if (state.mode === 'zip_gun') {
-      newGroupBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, '\u2192 New Group');
-      rowFileCtrl.appendChild(newGroupBtn);
-    }
-    rowFileCtrl.appendChild(fileFilter);
-    localBody.appendChild(rowFileCtrl);
-    fileListContainer = el('div', { id: 'file-list' });
-    localBody.appendChild(fileListContainer);
-    buildFileTable(fileListContainer, '');
-    sectionFiles.appendChild(localBody);
-  }
-
-  function updateFileControls() {
-    if (!toggleSelectBtn || !counterSpan) { return; }
-    var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-    var selectableCount = state.files.filter(function (f) {
-      return !f.isDirectory && !isAnchorFile(f.name);
-    }).length;
-    var selectedCount = state.files.filter(function (f) {
-      if (f.isDirectory || isAnchorFile(f.name)) { return false; }
-      var absPath = folder ? folder + '/' + f.name : f.name;
-      return state.selectedFiles.has(absPath);
-    }).length;
-    var label;
-    if (selectedCount === 0) {
-      label = '\u2611 Select all';
-    } else if (selectedCount === selectableCount) {
-      label = '\u2610 Deselect all';
-    } else {
-      label = '\u229f Select all';
-    }
-    toggleSelectBtn.textContent = label;
-    counterSpan.textContent = selectedCount + ' / ' + selectableCount;
-  }
-  _updateFileControlsFn = updateFileControls;
-  if (!state.sectionCollapsed.local && state.files.length > 0) {
-    updateFileControls();
-  }
-
-  app.appendChild(sectionFiles);
-
   // ---- ZIP name row ----
   var anchorBase = (state.anchorFile || '').replace(/\\/g, '/').split('/').pop() || '';
   var anchorStem = anchorBase.includes('.') ? anchorBase.slice(0, anchorBase.lastIndexOf('.')) : anchorBase;
-  var sectionZip = el('div', { id: 'section-zipname' });
+  var sectionZip = el('div', { id: 'section-zipname', style: 'margin-top:12px;' });
   var zipNameInput = null;
-  if (state.mode === 'zip_canon' && state.anchorFile) {
+  if (state.mode === 'zip_canon') {
     var rowZip = el('div', { className: 'row' });
     rowZip.appendChild(el('label', null, 'Archive name'));
     zipNameInput = document.createElement('input');
     zipNameInput.type = 'text';
     zipNameInput.value = state.zipBaseName || anchorStem;
-    zipNameInput.placeholder = anchorStem + '_YYYYMMDDTHHMMSS.zip';
+    zipNameInput.placeholder = state.anchorFile ? (anchorStem + '_YYYYMMDDTHHMMSS.zip') : 'e.g. batch_upload';
     zipNameInput.style.flex = '1';
     zipNameInput.addEventListener('input', function () {
       state.zipBaseName = zipNameInput.value.trim() || null;
@@ -799,6 +816,9 @@ function renderUploadView(app) {
     rowZip.appendChild(zipNameInput);
     rowZip.appendChild(el('span', { style: 'opacity:0.6;font-size:0.85em;margin-left:4px;' }, '+timestamp.zip'));
     sectionZip.appendChild(rowZip);
+    if (!state.anchorFile) {
+      sectionZip.appendChild(el('div', { style: 'opacity:0.55;font-size:0.8em;margin-top:2px;' }, 'No anchor pinned \u2014 first selected file used for naming'));
+    }
   }
   app.appendChild(sectionZip);
 
@@ -815,10 +835,23 @@ function renderUploadView(app) {
   }
 
   // ---- Upload controls ----
-  var rowUpload = el('div', { className: 'row' });
-  var uploadBtn = el('button', null, 'FIRE');
-  uploadBtn.disabled = state.uploading || !state.selectedPresetName || state.selectedFiles.size === 0;
-  var stopBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, 'HOLD');
+  var rowUpload = el('div', { className: 'row', style: 'justify-content:center;' });
+  var uploadBtn = el('button', { className: 'btn-fire' }, 'FIRE');
+  var noFiles = state.mode === 'zip_gun'
+    ? !state.fileGroups.some(function(fg) { return state.selectedFiles.has(fg.filePath); })
+    : state.selectedFiles.size === 0;
+  uploadBtn.disabled = state.uploading || !state.selectedPresetName || noFiles;
+  if (uploadBtn.disabled && !state.uploading) {
+    var hints = [];
+    if (!state.selectedPresetName) { hints.push('no account selected'); }
+    if (noFiles) {
+      hints.push(state.mode === 'zip_gun'
+        ? 'check files and assign to groups'
+        : 'no files selected');
+    }
+    uploadBtn.title = hints.join(' \u00b7 ');
+  }
+  var stopBtn = el('button', { className: 'btn-hold', style: 'margin-left:12px;' }, 'HOLD');
   stopBtn.disabled = !state.uploading;
   rowUpload.appendChild(uploadBtn);
   rowUpload.appendChild(stopBtn);
@@ -850,11 +883,6 @@ function renderUploadView(app) {
     state.selectedPath = null;
     state.addPathValue = '';
     persistState();
-    render();
-  });
-
-  manageBtn.addEventListener('click', function () {
-    state.view = 'manage';
     render();
   });
 
@@ -912,31 +940,38 @@ function renderUploadView(app) {
     vscode.postMessage({ kind: 'pickFolder' });
   });
 
-  if (!state.sectionCollapsed.local && state.files.length > 0 && fileListContainer) {
+  if (!state.sectionCollapsed.local && fileListContainer) {
     toggleSelectBtn.addEventListener('click', function () {
       var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
       var selectableFiles = state.files.filter(function (f) { return !f.isDirectory && !isAnchorFile(f.name); });
-      var allSelected = selectableFiles.every(function (f) {
+      var allLocalSelected = selectableFiles.every(function (f) {
         var absPath = folder ? folder + '/' + f.name : f.name;
         return state.selectedFiles.has(absPath);
       });
+      var allOpenSelected = openFileRows.every(function (of) {
+        return state.selectedFiles.has(of.filePath);
+      });
+      var allSelected = allLocalSelected && allOpenSelected
+                     && (selectableFiles.length + openFileRows.length > 0);
       if (allSelected) {
         selectableFiles.forEach(function (f) {
           var absPath = folder ? folder + '/' + f.name : f.name;
           state.selectedFiles.delete(absPath);
         });
+        openFileRows.forEach(function (of) { state.selectedFiles.delete(of.filePath); });
       } else {
         selectableFiles.forEach(function (f) {
           var absPath = folder ? folder + '/' + f.name : f.name;
           state.selectedFiles.add(absPath);
         });
+        openFileRows.forEach(function (of) { state.selectedFiles.add(of.filePath); });
       }
-      buildFileTable(fileListContainer, fileFilter.value);
+      buildFileTable(fileListContainer, fileFilter.value, openFileRows);
       updateFileControls();
     });
 
     fileFilter.addEventListener('input', function () {
-      buildFileTable(fileListContainer, fileFilter.value);
+      buildFileTable(fileListContainer, fileFilter.value, openFileRows);
     });
 
     if (newGroupBtn) {
@@ -954,7 +989,34 @@ function renderUploadView(app) {
         // Auto-anchor for the new group
         var sortedUngrouped = ungrouped.slice().sort();
         state.groupAnchors[gid] = sortedUngrouped[0];
-        buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '');
+        buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '', openFileRows);
+      });
+    }
+
+    if (clearGroupsBtn) {
+      clearGroupsBtn.addEventListener('click', function() {
+        // Keep group containers (G1, G2...); un-assign files and deselect
+        state.fileGroups   = [];
+        state.groupAnchors = {};
+        state.selectedFiles.clear();
+        persistState();
+        buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '', openFileRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+      });
+    }
+
+    if (resetAllBtn) {
+      resetAllBtn.addEventListener('click', function() {
+        state.selectedFiles.clear();
+        state.anchorFile   = null;
+        state.modeAnchors  = {};
+        state.fileGroups   = [];
+        state.groups       = [];
+        state.groupAnchors = {};
+        state.nextGroupId  = 1;
+        state.zipBaseName  = null;
+        persistState();
+        render();
       });
     }
   }
@@ -1009,8 +1071,8 @@ function renderUploadView(app) {
       presetName: pr.name,
       selectedPaths: [effectivePath],
     };
-    if (state.mode === 'zip_canon' && state.anchorFile) {
-      payload.archiveName = state.zipBaseName || anchorStem;
+    if (state.mode === 'zip_canon') {
+      payload.archiveName = state.zipBaseName || anchorStem || '';
     }
     state.uploading = true;
     pushLog(pr.name + ' \u2014 ' + (({ zip_canon: 'ZIP Canon', pistol_file: 'Pistol File', zip_gun: 'ZIP Gun' })[state.mode] || state.mode) + ' upload', 'session');
@@ -1029,39 +1091,199 @@ function renderUploadView(app) {
   });
 }
 
-function buildFileTable(container, filterStr) {
+// openFileRows: optional array of {filePath, fileName, folderPath} — open VS Code tabs not in local folder.
+// Column order: [checkbox][pin ⚲][↗ switch-folder][filename][group dropdown (zip_gun only)]
+function buildFileTable(container, filterStr, openFileRows) {
+  var _prevWrap = container.querySelector('.file-table-wrap');
+  var _prevScroll = _prevWrap ? _prevWrap.scrollTop : 0;
   clearEl(container);
   var filter = (filterStr || '').toLowerCase();
-  var visible = state.files.filter(function (f) {
+  var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+
+  var localVisible = state.files.filter(function (f) {
     if (f.isDirectory) { return false; }
     if (filter && !f.name.toLowerCase().includes(filter)) { return false; }
     return true;
   });
-  if (visible.length === 0) { return; }
+  var openVisible = (openFileRows || []).filter(function(of) {
+    return !filter || of.fileName.toLowerCase().includes(filter);
+  });
+
+  if (localVisible.length === 0 && openVisible.length === 0) { return; }
 
   var wrap = el('div', { className: 'file-table-wrap' });
   var table = el('table', { className: 'file-table' });
 
   var thead = document.createElement('thead');
   var hrow = document.createElement('tr');
-  hrow.appendChild(el('th', null, ''));
-  hrow.appendChild(el('th', null, 'File (' + visible.length + ')'));
+  hrow.appendChild(el('th', null, ''));  // checkbox
+  hrow.appendChild(el('th', null, ''));  // pin ⚲
+  hrow.appendChild(el('th', null, ''));  // ↗ switch-folder
+  hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
   if (state.mode === 'zip_gun') {
     hrow.appendChild(el('th', null, 'Group'));
-    hrow.appendChild(el('th', null, ''));
-  } else if (state.mode === 'zip_canon') {
-    hrow.appendChild(el('th', null, ''));
   }
   thead.appendChild(hrow);
   table.appendChild(thead);
 
-  var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
   var tbody = document.createElement('tbody');
-  visible.forEach(function (f) {
+
+  // ── Pin cell builder ────────────────────────────────────────────────────
+  function buildPinCell(absPath, isLocalAnchor) {
+    var td = document.createElement('td');
+    td.className = 'pin-cell';
+    var span = document.createElement('span');
+    span.textContent = '\u26b2';
+
+    if (state.mode === 'zip_gun') {
+      var fg = state.fileGroups.find(function(x) { return x.filePath === absPath; });
+      if (fg) {
+        var pinned = state.groupAnchors[fg.groupId] === absPath;
+        span.title = pinned ? 'Group anchor' : 'Set as group anchor';
+        span.className = pinned ? 'pin-icon pin-icon-active' : 'pin-icon pin-icon-hover';
+        if (!pinned) {
+          (function(ap, gid) {
+            span.addEventListener('click', function() {
+              state.groupAnchors[gid] = ap;
+              buildFileTable(container, filterStr, openFileRows);
+            });
+          }(absPath, fg.groupId));
+        }
+      } else {
+        span.className = 'pin-icon';
+        span.style.opacity = '0.2';
+        span.title = 'Assign to a group to set anchor';
+      }
+    } else if (state.mode === 'zip_canon') {
+      if (isLocalAnchor) {
+        span.title = 'Current anchor';
+        span.className = 'pin-icon pin-icon-active';
+      } else {
+        span.title = 'Set as anchor';
+        span.className = 'pin-icon pin-icon-hover';
+        (function(ap) {
+          span.addEventListener('click', function () {
+            state.anchorFile = ap;
+            state.zipBaseName = null;
+            persistState();
+            render();
+          });
+        }(absPath));
+      }
+    } else {
+      span.style.visibility = 'hidden';
+    }
+
+    td.appendChild(span);
+    return td;
+  }
+
+  // ── Group dropdown cell builder (zip_gun) ────────────────────────────────
+  function buildGroupCell(absPath) {
+    var td = document.createElement('td');
+    var sel = document.createElement('select');
+    sel.className = 'group-select';
+
+    var ungrp = document.createElement('option');
+    ungrp.value = '';
+    ungrp.textContent = '\u2014';
+    sel.appendChild(ungrp);
+
+    state.groups.forEach(function(g) {
+      var opt = document.createElement('option');
+      opt.value = String(g.id);
+      opt.textContent = g.label;
+      sel.appendChild(opt);
+    });
+
+    var curFg = state.fileGroups.find(function(fg) { return fg.filePath === absPath; });
+    sel.value = curFg ? String(curFg.groupId) : '';
+
+    (function(ap) {
+      sel.addEventListener('change', function() {
+        state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== ap; });
+        var gid = parseInt(sel.value, 10);
+        if (!isNaN(gid)) {
+          state.fileGroups.push({ filePath: ap, groupId: gid });
+          if (!state.groupAnchors[gid]) { state.groupAnchors[gid] = ap; }
+        }
+        buildFileTable(container, filterStr, openFileRows);
+      });
+    }(absPath));
+
+    td.appendChild(sel);
+    return { td: td, curFg: curFg };
+  }
+
+  // ── Open-file rows ───────────────────────────────────────────────────────
+  openVisible.forEach(function(of) {
+    var absPath = of.filePath;
+    var tr = document.createElement('tr');
+    tr.className = 'open-file-row';
+
+    // Checkbox
+    var tdCb = document.createElement('td');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = state.selectedFiles.has(absPath);
+    (function(ap) {
+      cb.addEventListener('change', function() {
+        if (cb.checked) { state.selectedFiles.add(ap); }
+        else            { state.selectedFiles.delete(ap); }
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+      });
+    }(absPath));
+    tdCb.appendChild(cb);
+    tr.appendChild(tdCb);
+
+    // Pin
+    tr.appendChild(buildPinCell(absPath, false));
+
+    // Switch-folder ↗
+    var tdSw = document.createElement('td');
+    tdSw.className = 'pin-cell';
+    var swSpan = document.createElement('span');
+    swSpan.className = 'hover-icon';
+    swSpan.textContent = '\u2197';
+    swSpan.title = 'Switch local folder to this file\u2019s folder';
+    (function(fp) {
+      swSpan.addEventListener('click', function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ kind: 'switchFolder', payload: { folderPath: fp } });
+      });
+    }(of.folderPath));
+    tdSw.appendChild(swSpan);
+    tr.appendChild(tdSw);
+
+    // Filename
+    var tdName = document.createElement('td');
+    tdName.textContent = of.fileName;
+    tr.appendChild(tdName);
+
+    // Group dropdown
+    if (state.mode === 'zip_gun') {
+      var gr = buildGroupCell(absPath);
+      if (gr.curFg) { tr.className += ' group-color-' + ((gr.curFg.groupId - 1) % 8 + 1); }
+      tr.appendChild(gr.td);
+    }
+
+    // Double-click to open in editor
+    (function(ap) {
+      tr.addEventListener('dblclick', function() {
+        vscode.postMessage({ kind: 'openFileInEditor', payload: { filePath: ap } });
+      });
+    }(absPath));
+
+    tbody.appendChild(tr);
+  });
+
+  // ── Local file rows ──────────────────────────────────────────────────────
+  localVisible.forEach(function (f) {
     var anchor = isAnchorFile(f.name);
     var absPath = folder ? folder + '/' + f.name : f.name;
     var tr = document.createElement('tr');
 
+    // Checkbox
     var tdCb = document.createElement('td');
     var cb = document.createElement('input');
     cb.type = 'checkbox';
@@ -1081,112 +1303,38 @@ function buildFileTable(container, filterStr) {
     tdCb.appendChild(cb);
     tr.appendChild(tdCb);
 
+    // Pin
+    tr.appendChild(buildPinCell(absPath, anchor));
+
+    // Switch-folder: empty cell for local files (already here)
+    tr.appendChild(document.createElement('td'));
+
+    // Filename
     var tdName = document.createElement('td');
     tdName.textContent = f.name;
     tr.appendChild(tdName);
 
-    // Group dropdown cell — zip_gun mode only
+    // Group dropdown
     if (state.mode === 'zip_gun') {
-      var tdGroup = document.createElement('td');
-      var groupSel = document.createElement('select');
-      groupSel.className = 'group-select';
-
-      // Option: ungrouped
-      var ungrpOpt = document.createElement('option');
-      ungrpOpt.value = '';
-      ungrpOpt.textContent = '\u2014'; // —
-      groupSel.appendChild(ungrpOpt);
-
-      // Options: existing groups
-      state.groups.forEach(function(g) {
-        var opt = document.createElement('option');
-        opt.value = String(g.id);
-        opt.textContent = g.label;
-        groupSel.appendChild(opt);
-      });
-
-      // Set current value
-      var currentFg = state.fileGroups.find(function(fg) { return fg.filePath === absPath; });
-      groupSel.value = currentFg ? String(currentFg.groupId) : '';
-
-      // Change handler
-      (function(ap) {
-        groupSel.addEventListener('change', function() {
-          state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== ap; });
-          var gid = parseInt(groupSel.value, 10);
-          if (!isNaN(gid)) {
-            state.fileGroups.push({ filePath: ap, groupId: gid });
-            // Set auto-anchor if group has no anchor yet
-            if (!state.groupAnchors[gid]) {
-              state.groupAnchors[gid] = ap;
-            }
-          }
-          buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '');
-        });
-      }(absPath));
-
-      tdGroup.appendChild(groupSel);
-      tr.appendChild(tdGroup);
-
-      // Color-code row by group
-      if (currentFg) {
-        tr.className = (tr.className ? tr.className + ' ' : '') + 'group-color-' + ((currentFg.groupId - 1) % 8 + 1);
-      }
-
-      // Per-group pin cell
-      var fgForPin = state.fileGroups.find(function(fg) { return fg.filePath === absPath; });
-      if (fgForPin) {
-        var tdPinGun = document.createElement('td');
-        tdPinGun.className = 'pin-cell';
-        var isPinned = state.groupAnchors[fgForPin.groupId] === absPath;
-        var pinSpanGun = document.createElement('span');
-        pinSpanGun.textContent = '\u26b2';
-        pinSpanGun.title = isPinned ? 'Group anchor' : 'Set as group anchor';
-        pinSpanGun.className = isPinned ? 'pin-icon pin-icon-active' : 'pin-icon pin-icon-hover';
-        if (!isPinned) {
-          (function(ap, gid) {
-            pinSpanGun.addEventListener('click', function() {
-              state.groupAnchors[gid] = ap;
-              buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '');
-            });
-          }(absPath, fgForPin.groupId));
-        }
-        tdPinGun.appendChild(pinSpanGun);
-        tr.appendChild(tdPinGun);
-      } else {
-        // Ungrouped — empty pin cell
-        tr.appendChild(document.createElement('td'));
-      }
-
-    // Pin icon cell — only in ZIP Canon mode
-    } else if (state.mode === 'zip_canon') {
-      var tdPin = document.createElement('td');
-      tdPin.className = 'pin-cell';
-      var pinSpan = document.createElement('span');
-      pinSpan.textContent = '\u26b2'; // ⚲
-      pinSpan.title = anchor ? 'Current anchor' : 'Set as anchor';
-      if (anchor) {
-        pinSpan.className = 'pin-icon pin-icon-active';
-      } else {
-        pinSpan.className = 'pin-icon pin-icon-hover';
-        (function(ap) {
-          pinSpan.addEventListener('click', function () {
-            state.anchorFile = ap;
-            state.zipBaseName = null;
-            persistState();
-            render();
-          });
-        }(absPath));
-      }
-      tdPin.appendChild(pinSpan);
-      tr.appendChild(tdPin);
+      var gr = buildGroupCell(absPath);
+      if (gr.curFg) { tr.className = 'group-color-' + ((gr.curFg.groupId - 1) % 8 + 1); }
+      tr.appendChild(gr.td);
     }
+
+    // Double-click to open in editor
+    (function(ap) {
+      tr.addEventListener('dblclick', function() {
+        vscode.postMessage({ kind: 'openFileInEditor', payload: { filePath: ap } });
+      });
+    }(absPath));
 
     tbody.appendChild(tr);
   });
+
   table.appendChild(tbody);
   wrap.appendChild(table);
   container.appendChild(wrap);
+  wrap.scrollTop = _prevScroll;
 }
 
 function buildCollapsibleHeader(sectionKey, labelText, count) {
@@ -1202,66 +1350,6 @@ function buildCollapsibleHeader(sectionKey, labelText, count) {
   });
   header.appendChild(headerBtn);
   return header;
-}
-
-function buildSourceFileTable(container, files) {
-  // files: [{filePath, fileName, folderPath}]
-  var table = el('table', { className: 'file-table' });
-  var tbody = document.createElement('tbody');
-  files.forEach(function (f) {
-    var tr = document.createElement('tr');
-    tr.className = 'source-file-row';
-
-    // Checkbox
-    var tdCb = document.createElement('td');
-    var cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = state.selectedFiles.has(f.filePath);
-    var filePath = f.filePath; // closure
-    cb.addEventListener('change', function () {
-      if (cb.checked) { state.selectedFiles.add(filePath); }
-      else            { state.selectedFiles.delete(filePath); }
-    });
-    tdCb.appendChild(cb);
-    tr.appendChild(tdCb);
-
-    // Filename
-    var tdName = document.createElement('td');
-    tdName.textContent = f.fileName;
-    tr.appendChild(tdName);
-
-    // Folder path (smaller text)
-    var tdFolder = document.createElement('td');
-    tdFolder.className = 'folder-path-cell';
-    tdFolder.textContent = (f.folderPath || '').replace(/\\/g, '/');
-    tr.appendChild(tdFolder);
-
-    // Hover actions column
-    var tdActions = document.createElement('td');
-    tdActions.className = 'hover-actions';
-    var switchBtn = document.createElement('span');
-    switchBtn.className = 'hover-icon';
-    switchBtn.textContent = '\u2197'; // ↗
-    switchBtn.title = 'Switch local folder to this file\u2019s folder';
-    var folderPath = f.folderPath; // closure
-    switchBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      vscode.postMessage({ kind: 'switchFolder', payload: { folderPath: folderPath } });
-    });
-    tdActions.appendChild(switchBtn);
-    tr.appendChild(tdActions);
-
-    // Double-click opens in editor
-    tr.addEventListener('dblclick', function () {
-      vscode.postMessage({ kind: 'openFileInEditor', payload: { filePath: filePath } });
-    });
-
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  var wrap = el('div', { className: 'file-table-wrap' });
-  wrap.appendChild(table);
-  container.appendChild(wrap);
 }
 
 function buildHistory(container) {
@@ -1425,15 +1513,7 @@ function renderRemoteBrowseOverlay(app) {
 // ---------------------------------------------------------------------------
 
 function renderManageView(app) {
-  clearEl(app);
-
-  // Header row
-  var rowHeader = el('div', { className: 'row', style: 'align-items:center;' });
-  var backBtn = el('button', { className: 'secondary' }, '\u2190 Back');
-  var h2 = el('h2', { style: 'margin:0 0 0 12px;' }, 'Manage Accounts');
-  rowHeader.appendChild(backBtn);
-  rowHeader.appendChild(h2);
-  app.appendChild(rowHeader);
+  // Account cards
 
   // Account cards
   state.presets.forEach(function (p) {
@@ -1559,14 +1639,6 @@ function renderManageView(app) {
   app.appendChild(rowLog);
 
   // Listeners
-  backBtn.addEventListener('click', function () {
-    state.view = 'upload';
-    state.showPresetForm = false;
-    state.editingPreset = null;
-    state.formDraft = null;
-    render();
-  });
-
   addBtn.addEventListener('click', function () {
     state.editingPreset = null;
     state.showPresetForm = true;

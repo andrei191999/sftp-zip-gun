@@ -93,7 +93,7 @@ export interface PanelState {
   lastPresetName?: string;
   mode?: UploadMode;
   anchorFile?: string;
-  sectionCollapsed?: { recent: boolean; open: boolean; local: boolean };
+  sectionCollapsed?: { local: boolean };
 }
 
 // ---------------------------------------------------------------------------

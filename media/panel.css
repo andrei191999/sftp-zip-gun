@@ -74,10 +74,14 @@ button:hover:not(:disabled) {
 button.secondary {
   background-color: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
+  border-radius: 4px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
 }
 
 button.secondary:hover:not(:disabled) {
   background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
+  border-color: var(--vscode-focusBorder, transparent);
 }
 
 button:disabled {
@@ -86,8 +90,8 @@ button:disabled {
 }
 
 button.active {
-  background-color: var(--vscode-testing-iconPassed);
-  color: var(--vscode-editor-background);
+  background-color: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
 }
 
 /* ---------------------------------------------------------------------------
@@ -128,12 +132,43 @@ button.active {
   color: var(--vscode-button-foreground);
 }
 
+/* Per-mode distinct inactive colors */
+.mode-half-zip-canon:not(.active)   { background-color: rgba(60, 120, 255, 0.25); }
+.mode-half-pistol-file:not(.active) { background-color: rgba(0, 190, 210, 0.4); }
+.mode-half-zip-gun:not(.active)     { background-color: rgba(170, 50, 255, 0.25); }
+
 .mode-toggle:hover .mode-half.active {
   background-color: var(--vscode-button-hoverBackground);
 }
 
 .mode-toggle:hover .mode-half:not(.active) {
   background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
+}
+
+/* ---------------------------------------------------------------------------
+   View tab bar (Transfer files / Manage connections)
+--------------------------------------------------------------------------- */
+
+.view-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+  margin-bottom: 14px;
+}
+
+.view-tab {
+  padding: 6px 18px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: var(--vscode-foreground);
+  opacity: 0.6;
+  user-select: none;
+  font-size: 0.9em;
+}
+
+.view-tab.active {
+  border-bottom-color: var(--vscode-focusBorder);
+  opacity: 1;
+  font-weight: 600;
 }
 
 /* ---------------------------------------------------------------------------
@@ -442,6 +477,7 @@ h3 {
 
 .section-body {
   padding-left: 0;
+  margin-top: 8px;
   margin-bottom: 4px;
 }
 
@@ -452,6 +488,23 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Local folder button — icon + path span; path clips from left (shows end) */
+.folder-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.folder-path-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
 }
 
 .source-file-row .hover-actions {
@@ -531,4 +584,27 @@ tr:hover .pin-icon-hover {
   color: var(--vscode-editorWarning-foreground, #ff9800);
   font-size: 0.85em;
   padding: 4px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   FIRE / HOLD upload action buttons
+--------------------------------------------------------------------------- */
+
+button.btn-fire,
+button.btn-hold {
+  padding: 8px 52px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 4px;
+}
+
+button.btn-hold {
+  background-color: var(--vscode-statusBarItem-errorBackground, var(--vscode-inputValidation-errorBorder));
+  color: var(--vscode-statusBarItem-errorForeground, var(--vscode-button-foreground));
+  border: none;
+}
+
+button.btn-hold:hover:not(:disabled) {
+  background-color: var(--vscode-statusBarItem-errorBackground, var(--vscode-inputValidation-errorBorder));
+  filter: brightness(1.15);
 }

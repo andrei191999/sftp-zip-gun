@@ -175,6 +175,17 @@
               }
             }
           }
+        },
+        "sftpZipGun.defaultMode": {
+          "type": "string",
+          "default": "pistol_file",
+          "enum": ["zip_canon", "pistol_file", "zip_gun"],
+          "enumDescriptions": [
+            "ZIP Canon — all files zipped into one archive",
+            "ZIP Pistol — each file uploaded separately",
+            "ZIP Gun — files grouped into multiple zips"
+          ],
+          "description": "Upload mode used when the panel opens for the first time (before any mode has been saved)."
         }
       }
     }

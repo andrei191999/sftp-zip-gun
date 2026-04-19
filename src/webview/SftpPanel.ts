@@ -5,7 +5,7 @@ import * as path from 'path';
 import { PresetManager } from '../config/presetManager';
 import { StateManager } from '../config/stateManager';
 import { SftpClient, AbortError } from '../sftp/sftpClient';
-import { buildZip } from '../sftp/zipBuilder';
+import { buildZip, formatTimestamp } from '../sftp/zipBuilder';
 import { parseFileZillaXml } from '../config/fileZillaImporter';
 import {
   WebviewToHost, HostToWebview, assertNever,
@@ -84,6 +84,9 @@ export class SftpPanel {
       null,
       this._disposables
     );
+    vscode.window.tabGroups.onDidChangeTabs(() => {
+      this._handleGetOpenFiles();
+    }, null, this._disposables);
   }
 
   private _getHtml(webview: vscode.Webview): string {
@@ -168,6 +171,10 @@ export class SftpPanel {
       case 'ready': {
         this.refreshPresets();
         const state = this._stateManager.getState();
+        if (!state.mode) {
+          const dflt = vscode.workspace.getConfiguration('sftpZipGun').get<UploadMode>('defaultMode');
+          if (dflt) { state.mode = dflt; }
+        }
         this._post({ kind: 'state', payload: state });
         this._post({ kind: 'history', payload: { entries: this._stateManager.getHistory() } });
         const folderToList = state.lastFolder ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -402,14 +409,18 @@ export class SftpPanel {
         try {
           // ── ZIP phase ───────────────────────────────────────────────────────
           if (mode === 'zip_canon') {
-            const stem = archiveName ?? path.basename(anchorFile!, path.extname(anchorFile!));
             const filesForZip = files ?? [];
+            const anchorForZip = anchorFile ?? filesForZip[0];
+            const stem = (archiveName && archiveName.trim())
+              ? archiveName.trim()
+              : path.basename(anchorForZip, path.extname(anchorForZip));
             this._post({ kind: 'log', payload: { level: 'info', text: `Building ZIP archive\u2026 (${filesForZip.length} file${filesForZip.length === 1 ? '' : 's'})`, category: 'sys' } });
             progress.report({ message: `Building ZIP\u2026 (${filesForZip.length} files)` });
             this._zipping = true;
+            const canonStem = `${stem}_${formatTimestamp(new Date())}`;
             let firstZipProgress = true;
             try {
-              const zipPath = await buildZip(filesForZip, anchorFile!, stem, (processed, total) => {
+              const zipPath = await buildZip(filesForZip, anchorForZip, canonStem, (processed, total) => {
                 this._post({ kind: 'log', payload: { level: 'info', text: `Zipping\u2026 ${processed}/${total}`, category: 'sys', replace: !firstZipProgress } });
                 const zipMsg = `Building ZIP\u2026 ${processed}/${total}`;
                 progress.report({ message: zipMsg });
@@ -439,8 +450,9 @@ export class SftpPanel {
                 } else if (groupNaming === 'base-counter') {
                   const pad = String(totalGroups).length;
                   stem = `${namingBase}_${String(gi + 1).padStart(pad, '0')}`;
-                } else { // base-timestamp
-                  stem = `${namingBase}_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}_${gi + 1}`;
+                } else { // base-timestamp — strip all non-digits for clean 17-digit ms timestamp
+                  const tsMs = new Date().toISOString().replace(/[^0-9]/g, '');
+                  stem = `${namingBase}_${tsMs}`;
                 }
 
                 this._post({ kind: 'log', payload: { level: 'info', text: `${groupPrefix}Building ZIP (${group.files.length} file${group.files.length === 1 ? '' : 's'})\u2026`, category: 'sys' } });
@@ -475,7 +487,7 @@ export class SftpPanel {
           if (client.isAborted) { throw new AbortError(); }
           progress.report({ message: `Connecting to ${preset.host}\u2026` });
           await client.connect(connectOpts);
-          this._post({ kind: 'log', payload: { level: 'info', text: `Connected to ${preset.host}:${preset.port}` } });
+          this._post({ kind: 'log', payload: { level: 'info', text: `Connected to ${preset.host}:${preset.port}`, category: 'sys' } });
 
           this._uploading = true;
           let overallTransferred = 0;
@@ -488,7 +500,7 @@ export class SftpPanel {
               const basename = path.basename(localPath);
               const remotePath = remoteBase === '/' ? `/${basename}` : `${remoteBase}/${basename}`;
 
-              this._post({ kind: 'log', payload: { level: 'info', text: `${pathPrefix}Uploading ${basename}\u2026` } });
+              this._post({ kind: 'log', payload: { level: 'info', text: `${pathPrefix}Uploading ${basename}\u2026`, category: 'sys' } });
               this._currentRemotePath = remotePath;
 
               const done = await client.uploadFile(localPath, remotePath, (p) => {
@@ -510,13 +522,15 @@ export class SftpPanel {
 
               this._currentRemotePath = undefined;
               overallTransferred += done.bytesTransferred;
-              this._post({ kind: 'log', payload: { level: 'info', text: `${pathPrefix}\u2713 ${basename} (${done.bytesTransferred} bytes, ${done.durationMs}ms)` } });
+              this._post({ kind: 'log', payload: { level: 'info', text: `${pathPrefix}\u2713 ${basename} (${done.bytesTransferred} bytes, ${done.durationMs}ms)`, category: 'sys' } });
             }
           }
 
-          const finalRemote = remoteBases.length === 1
-            ? `${remoteBases[0]}/${path.basename(uploadList[uploadList.length - 1])}`
-            : remoteBases.join(', ');
+          const finalRemote = mode === 'zip_gun' && remoteBases.length === 1
+            ? `${uploadedBasenames.join(' + ')} \u2192 ${remoteBases[0]}/`
+            : remoteBases.length === 1
+              ? `${remoteBases[0]}/${path.basename(uploadList[uploadList.length - 1])}`
+              : remoteBases.join(', ');
 
           const entry: HistoryEntry = {
             id: generateId(),
