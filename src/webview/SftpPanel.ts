@@ -26,7 +26,26 @@ export class SftpPanel {
   private _activeClient: SftpClient | undefined;
   private _zipping = false;
   private _uploading = false;
+  private _uploadStartMs = 0;
   private _currentRemotePath: string | undefined;
+  private _lastOpenFilePaths: string[] = [];
+  private _inFlightFilePath: string | undefined;   // pistol_file: local path being put()
+  private _inFlightGroupId: number | undefined;    // zip_gun: group id being processed
+  private _pendingGroupIds = new Set<number>();    // zip_gun: all groups marked zipping/uploading but not yet done/error
+
+  private _isUploadBusy(): boolean {
+    return this._zipping || this._uploading;
+  }
+
+  private _postUploadLog(text: string, level: 'info' | 'warn' | 'error' = 'info'): void {
+    this._post({ kind: 'log', payload: { level, text, category: 'upload' } });
+  }
+
+  private _setFileStatuses(filePaths: string[], status: 'queued' | 'zipping' | 'uploading' | 'done' | 'cancelled' | 'error'): void {
+    for (const filePath of filePaths) {
+      this._post({ kind: 'fileStatus', payload: { filePath, status } });
+    }
+  }
 
   static createOrShow(
     extensionUri: vscode.Uri,
@@ -141,6 +160,7 @@ export class SftpPanel {
     const savedPresets: PresetMeta[] = [];
     for (const p of result.presets) {
       const { password, ...preset } = p;
+      // Safe: parseFileZillaXml already filters duplicates by host|username fingerprint
       const saved = await presetManager.save({
         preset: preset as PresetMeta,
         password,
@@ -204,11 +224,19 @@ export class SftpPanel {
       }
 
       case 'pickFolder': {
+        if (this._isUploadBusy()) {
+          this._postUploadLog('Cannot change the local folder while an upload is running.', 'warn');
+          break;
+        }
         void this._handlePickFolder();
         break;
       }
 
       case 'listFiles': {
+        if (this._isUploadBusy()) {
+          this._postUploadLog('Cannot change the local folder while an upload is running.', 'warn');
+          break;
+        }
         void this._handleListFiles(msg.payload.folderPath);
         break;
       }
@@ -276,6 +304,10 @@ export class SftpPanel {
       }
 
       case 'switchFolder': {
+        if (this._isUploadBusy()) {
+          this._postUploadLog('Cannot change the local folder while an upload is running.', 'warn');
+          break;
+        }
         void this._handleListFiles(msg.payload.folderPath);
         break;
       }
@@ -300,10 +332,18 @@ export class SftpPanel {
         }
       }
     }
-    this._post({ kind: 'openFiles', payload: { files } });
+    const newPaths = files.map(file => file.path);
+    if (JSON.stringify(newPaths.sort()) !== JSON.stringify(this._lastOpenFilePaths.sort())) {
+      this._post({ kind: 'openFiles', payload: { files } });
+      this._lastOpenFilePaths = [...newPaths];
+    }
   }
 
   private async _handlePickFolder(): Promise<void> {
+    if (this._isUploadBusy()) {
+      this._postUploadLog('Cannot change the local folder while an upload is running.', 'warn');
+      return;
+    }
     const uris = await vscode.window.showOpenDialog({
       canSelectFiles: false,
       canSelectFolders: true,
@@ -315,6 +355,10 @@ export class SftpPanel {
   }
 
   private async _handleListFiles(folderPath: string): Promise<void> {
+    if (this._isUploadBusy()) {
+      this._postUploadLog('Cannot change the local folder while an upload is running.', 'warn');
+      return;
+    }
     try {
       const uri = vscode.Uri.file(folderPath);
       const entries = await vscode.workspace.fs.readDirectory(uri);
@@ -330,6 +374,8 @@ export class SftpPanel {
 
   private async _handleUpload(payload: UploadRequest): Promise<void> {
     const { mode, files, anchorFile, presetName, archiveName, selectedPaths } = payload;
+    const zipCanonSourceFiles = mode === 'zip_canon' ? [...(files ?? [])] : [];
+    this._uploadStartMs = Date.now();
 
     const preset = this._presetManager.getByName(presetName);
     if (!preset) {
@@ -363,9 +409,6 @@ export class SftpPanel {
       },
       async (progress, token) => {
         // ── Cancellation from the VS Code notification ───────────────────────
-        // uploadErrorPosted tracks whether onCancellationRequested already sent
-        // uploadError so the catch block can avoid a duplicate log entry.
-        let uploadErrorPosted = false;
         // When notification-cancel fires during the zip phase, VS Code dismisses the
         // original notification immediately. A replacement (non-cancellable) notification
         // is spawned instead and stays open until the zip finishes, so users doing a
@@ -376,11 +419,8 @@ export class SftpPanel {
 
         token.onCancellationRequested(() => {
           if (this._uploading) {
-            // Force-stop first so put() rejects before uploadDone can fire,
-            // then post the error so the webview never sees success after cancel.
+            // Force-stop so put() rejects; catch block posts uploadError after cleanup.
             this._activeClient?.forceAbort();
-            this._post({ kind: 'uploadError', payload: { message: 'Upload cancelled.' } });
-            uploadErrorPosted = true;
           } else if (this._zipping) {
             // Zip phase — archiver can't be stopped mid-stream. Flag abort and
             // warn the user, then spawn a replacement notification that stays open
@@ -417,6 +457,7 @@ export class SftpPanel {
             this._post({ kind: 'log', payload: { level: 'info', text: `Building ZIP archive\u2026 (${filesForZip.length} file${filesForZip.length === 1 ? '' : 's'})`, category: 'sys' } });
             progress.report({ message: `Building ZIP\u2026 (${filesForZip.length} files)` });
             this._zipping = true;
+            this._setFileStatuses(zipCanonSourceFiles, 'zipping');
             const canonStem = `${stem}_${formatTimestamp(new Date())}`;
             let firstZipProgress = true;
             try {
@@ -456,8 +497,11 @@ export class SftpPanel {
                 }
 
                 this._post({ kind: 'log', payload: { level: 'info', text: `${groupPrefix}Building ZIP (${group.files.length} file${group.files.length === 1 ? '' : 's'})\u2026`, category: 'sys' } });
+                this._post({ kind: 'fileStatus', payload: { groupId: group.id, status: 'zipping' } });
+                this._pendingGroupIds.add(group.id);
                 progress.report({ message: `${groupPrefix}Building ZIP\u2026` });
                 this._zipping = true;
+                this._inFlightGroupId = group.id;
                 try {
                   const zipPath = await buildZip(group.files, group.anchorFile, stem, (processed, total) => {
                     this._post({ kind: 'log', payload: { level: 'info', text: `${groupPrefix}Zipping\u2026 ${processed}/${total}`, category: 'sys', replace: processed > 1 } });
@@ -466,6 +510,7 @@ export class SftpPanel {
                   uploadedBasenames.push(path.basename(zipPath));
                 } finally {
                   this._zipping = false;
+                  this._inFlightGroupId = undefined;
                 }
               }
             } finally {
@@ -496,12 +541,27 @@ export class SftpPanel {
             const remoteBase = remoteBases[pi];
             const pathPrefix = remoteBases.length > 1 ? `[${pi + 1}/${remoteBases.length}] ${remoteBase}: ` : '';
 
-            for (const localPath of uploadList) {
+            for (let li = 0; li < uploadList.length; li++) {
+              const localPath = uploadList[li];
               const basename = path.basename(localPath);
               const remotePath = remoteBase === '/' ? `/${basename}` : `${remoteBase}/${basename}`;
 
               this._post({ kind: 'log', payload: { level: 'info', text: `${pathPrefix}Uploading ${basename}\u2026`, category: 'sys' } });
               this._currentRemotePath = remotePath;
+
+              // Emit per-file status for file-based modes; per-group status for zip_gun
+              if (mode === 'zip_canon') {
+                this._setFileStatuses(zipCanonSourceFiles, 'uploading');
+              } else if (mode === 'pistol_file') {
+                this._inFlightFilePath = localPath;
+                this._post({ kind: 'fileStatus', payload: { filePath: localPath, status: 'uploading' } });
+              } else if (mode === 'zip_gun') {
+                const grp = payload.groups?.[li];
+                if (grp) {
+                  this._inFlightGroupId = grp.id;
+                  this._post({ kind: 'fileStatus', payload: { groupId: grp.id, status: 'uploading' } });
+                }
+              }
 
               const done = await client.uploadFile(localPath, remotePath, (p) => {
                 const currentTransferred = overallTransferred + p.bytesTransferred;
@@ -515,6 +575,7 @@ export class SftpPanel {
                     totalBytes: totalSize,
                     percent: overallPercent,
                     currentFile: basename,
+                    currentFilePath: localPath,
                   },
                 });
                 progress.report({ increment: 0, message: `${pathPrefix}${basename} \u2014 ${p.percent}%` });
@@ -523,6 +584,23 @@ export class SftpPanel {
               this._currentRemotePath = undefined;
               overallTransferred += done.bytesTransferred;
               this._post({ kind: 'log', payload: { level: 'info', text: `${pathPrefix}\u2713 ${basename} (${done.bytesTransferred} bytes, ${done.durationMs}ms)`, category: 'sys' } });
+
+              // Mark done (only on last remote-path iteration to avoid done→uploading flicker for multi-path)
+              if (pi === remoteBases.length - 1) {
+                if (mode === 'zip_canon') {
+                  this._setFileStatuses(zipCanonSourceFiles, 'done');
+                } else if (mode === 'pistol_file') {
+                  this._inFlightFilePath = undefined;
+                  this._post({ kind: 'fileStatus', payload: { filePath: localPath, status: 'done' } });
+                } else if (mode === 'zip_gun') {
+                  const grp = payload.groups?.[li];
+                  if (grp) {
+                    this._inFlightGroupId = undefined;
+                    this._pendingGroupIds.delete(grp.id);
+                    this._post({ kind: 'fileStatus', payload: { groupId: grp.id, status: 'done' } });
+                  }
+                }
+              }
             }
           }
 
@@ -551,7 +629,7 @@ export class SftpPanel {
             payload: {
               remoteFile: finalRemote,
               bytesTransferred: overallTransferred,
-              durationMs: 0,
+              durationMs: Date.now() - this._uploadStartMs,
             },
           });
 
@@ -561,13 +639,22 @@ export class SftpPanel {
           const isAbort = err instanceof AbortError || client.isAborted;
           const message = err instanceof Error ? err.message : String(err);
 
+          // Emit error status for whatever file/group was in-flight when the error occurred
+          const terminalStatus = isAbort ? 'cancelled' : 'error';
+
+          if (mode === 'zip_canon' && zipCanonSourceFiles.length > 0) {
+            this._setFileStatuses(zipCanonSourceFiles, terminalStatus);
+          } else if (this._inFlightFilePath) {
+            this._post({ kind: 'fileStatus', payload: { filePath: this._inFlightFilePath, status: terminalStatus } });
+            this._inFlightFilePath = undefined;
+          }
+          for (const gid of this._pendingGroupIds) {
+            this._post({ kind: 'fileStatus', payload: { groupId: gid, status: terminalStatus } });
+          }
+          this._pendingGroupIds.clear();
+
           if (isAbort) {
-            // uploadErrorPosted is true only when notification cancel fired during upload
-            // (onCancellationRequested already sent the message). In all other paths
-            // (webview Stop, or notification cancel during zip), post it here.
-            if (!uploadErrorPosted) {
-              this._post({ kind: 'uploadError', payload: { message: 'Upload cancelled.' } });
-            }
+            this._post({ kind: 'uploadError', payload: { message: 'Upload cancelled.' } });
 
             // ── Partial file cleanup ──────────────────────────────────────────
             // _currentRemotePath is set only while a put() is in flight.
@@ -607,6 +694,9 @@ export class SftpPanel {
         } finally {
           this._uploading = false;
           this._currentRemotePath = undefined;
+          this._inFlightFilePath = undefined;
+          this._inFlightGroupId = undefined;
+          this._pendingGroupIds.clear();
           this._activeClient = undefined;
           await client.disconnect();
         }
@@ -665,12 +755,12 @@ export class SftpPanel {
       const connectOpts = await this._presetManager.resolveConnectOptions(preset);
       await client.connect(connectOpts);
       const entries = await client.listDirectory(remotePath);
-      await client.disconnect();
       this._post({ kind: 'remoteDirListed', payload: { presetName, path: remotePath, entries } });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log('error', `Remote browse failed for "${presetName}" at "${remotePath}": ${message}`);
       this._post({ kind: 'log', payload: { level: 'error', text: `Remote browse failed: ${message}` } });
+    } finally {
       await client.disconnect();
     }
   }

@@ -11,7 +11,7 @@ afterAll(() => {
   for (const p of createdZips) {
     try { fs.unlinkSync(p); } catch { /* ignore */ }
   }
-  try { fs.rmdirSync(tmpDir); } catch { /* ignore */ }
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 function makeTempFile(name: string, content = 'hello'): string {
@@ -37,10 +37,18 @@ function readZipEntries(zipPath: string): Promise<string[]> {
 }
 
 describe('buildZip', () => {
-  it('resolves with a path matching the filename pattern', async () => {
+  it('uses the caller-provided base name as-is by default', async () => {
     const f1 = makeTempFile('invoice.xml');
     const anchor = makeTempFile('anchor.xml');
     const zipPath = await buildZip([f1], anchor, 'bundle');
+    createdZips.push(zipPath);
+    expect(path.basename(zipPath)).toBe('bundle.zip');
+  });
+
+  it('appends a timestamp only when the caller explicitly requests it', async () => {
+    const f1 = makeTempFile('invoice-timestamp.xml');
+    const anchor = makeTempFile('anchor-timestamp.xml');
+    const zipPath = await buildZip([f1], anchor, 'bundle', undefined, true);
     createdZips.push(zipPath);
     expect(path.basename(zipPath)).toMatch(/^bundle_\d{8}T\d{6}\.zip$/);
   });

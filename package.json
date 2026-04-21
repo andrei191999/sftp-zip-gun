@@ -1,7 +1,7 @@
 {
   "name": "sftp-zip-gun",
   "displayName": "SFTP Zip Gun",
-  "description": "Upload files to SFTP servers without leaving VS Code. Manage presets, browse remote directories, and track upload history.",
+  "description": "Developer-first SFTP uploads for VS Code with ZIP Canon, Pistol File, ZIP Gun, remote path bookmarks, and upload history.",
   "version": "0.1.0",
   "publisher": "AndreiMacovei",
   "repository": {
@@ -182,7 +182,7 @@
           "enum": ["zip_canon", "pistol_file", "zip_gun"],
           "enumDescriptions": [
             "ZIP Canon — all files zipped into one archive",
-            "ZIP Pistol — each file uploaded separately",
+            "Pistol File — each file uploaded separately",
             "ZIP Gun — files grouped into multiple zips"
           ],
           "description": "Upload mode used when the panel opens for the first time (before any mode has been saved)."
@@ -201,6 +201,7 @@
     "@types/node": "^25.6.0",
     "@types/vscode": "^1.74.0",
     "@types/yauzl": "^2.10.3",
+    "yauzl": "^2.10.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.0",
     "jest": "^30.3.0",
