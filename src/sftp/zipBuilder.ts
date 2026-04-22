@@ -16,13 +16,10 @@ export function buildZip(
   files: string[],
   anchorFile: string,
   baseName: string,
-  onProgress?: (processed: number, total: number) => void,
-  appendTimestamp = false
+  onProgress?: (processed: number, total: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const zipName = appendTimestamp
-      ? `${baseName}_${formatTimestamp(new Date())}.zip`
-      : `${baseName}.zip`;
+    const zipName = `${baseName}.zip`;
     const outPath = path.join(path.dirname(anchorFile), zipName);
 
     const output = fs.createWriteStream(outPath);

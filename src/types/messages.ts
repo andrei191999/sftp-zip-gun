@@ -94,6 +94,7 @@ export interface PanelState {
   mode?: UploadMode;
   anchorFile?: string;
   sectionCollapsed?: { local: boolean };
+  groupCollapsed?: Record<number, boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +129,7 @@ export type WebviewToHost =
 export type HostToWebview =
   | { kind: 'filesListed';       payload: FilesListedPayload }
   | { kind: 'uploadProgress';    payload: ProgressPayload }
+  | { kind: 'fileStatus';        payload: FileStatusPayload }
   | { kind: 'uploadDone';        payload: DonePayload }
   | { kind: 'uploadError';       payload: ErrorPayload }
   | { kind: 'presets';           payload: PresetsPayload }
@@ -156,6 +158,7 @@ export interface ProgressPayload {
   totalBytes: number;
   percent: number;        // 0–100
   currentFile?: string;   // basename of file being transferred
+  currentFilePath?: string; // absolute path — used for precise row matching in the file table
 }
 
 export interface DonePayload {
@@ -192,6 +195,12 @@ export interface FileZillaImportedPayload {
   total: number;
   presets: PresetMeta[];
   newPresetNames: string[];
+}
+
+export interface FileStatusPayload {
+  filePath?: string;   // pistol_file and zip_canon: absolute path of the local source row
+  groupId?: number;    // zip_gun: group.id of the group being processed
+  status: 'queued' | 'zipping' | 'uploading' | 'done' | 'cancelled' | 'error';
 }
 
 export interface LogPayload {
