@@ -1,6 +1,7 @@
 src/
 *.ts
 *.map
+**/*.map
 tsconfig.json
 tsconfig.jest.json
 jest.config.js
@@ -9,8 +10,11 @@ docs/
 spikes/
 scripts/
 .git/
+.gitignore
 .vscode/
+.vscode-test/
 .claude/
+.codex/
 .remember/
 .superpowers/
 
