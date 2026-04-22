@@ -24,9 +24,10 @@ describe('StateManager — getState defaults', () => {
 
 describe('StateManager — setState merging', () => {
   let sm: StateManager;
+  let ctx: ReturnType<typeof makeMockContext>;
 
   beforeEach(() => {
-    const ctx = makeMockContext();
+    ctx = makeMockContext();
     sm = new StateManager(ctx as any);
   });
 
@@ -41,6 +42,11 @@ describe('StateManager — setState merging', () => {
     const state = sm.getState();
     expect(state.lastPresetName).toBe('preset-a');
     expect(state.mode).toBe('pistol_file');
+  });
+
+  it('persists panel state under the expected storage key', async () => {
+    await sm.setState({ lastPresetName: 'saved-preset' });
+    expect(ctx.globalState.keys()).toContain('sftpZipGun.panelState');
   });
 });
 

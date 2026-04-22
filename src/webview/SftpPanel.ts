@@ -12,6 +12,7 @@ import {
   PresetMeta, HistoryEntry, UploadMode, UploadRequest, generateId,
 } from '../types/messages';
 import { log } from '../logger';
+import { sanitizeUserFacingError } from '../errors/userFacingError';
 
 export class SftpPanel {
   static currentPanel: SftpPanel | undefined;
@@ -368,7 +369,11 @@ export class SftpPanel {
       this._post({ kind: 'filesListed', payload: { folderPath, files } });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this._post({ kind: 'log', payload: { level: 'error', text: `Failed to list folder: ${message}` } });
+      log('error', `Failed to list folder "${folderPath}": ${message}`);
+      this._post({
+        kind: 'log',
+        payload: { level: 'error', text: `Failed to list folder: ${sanitizeUserFacingError(message)}` },
+      });
     }
   }
 
@@ -388,7 +393,8 @@ export class SftpPanel {
       connectOpts = await this._presetManager.resolveConnectOptions(preset);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      this._post({ kind: 'uploadError', payload: { message } });
+      log('error', `Failed to resolve connection options for "${preset.name}": ${message}`);
+      this._post({ kind: 'uploadError', payload: { message: sanitizeUserFacingError(message) } });
       return;
     }
 
@@ -638,6 +644,7 @@ export class SftpPanel {
         } catch (err: unknown) {
           const isAbort = err instanceof AbortError || client.isAborted;
           const message = err instanceof Error ? err.message : String(err);
+          const userMessage = sanitizeUserFacingError(message);
 
           // Emit error status for whatever file/group was in-flight when the error occurred
           const terminalStatus = isAbort ? 'cancelled' : 'error';
@@ -677,8 +684,9 @@ export class SftpPanel {
               this._post({ kind: 'log', payload: { level: 'warn', text: `Partial file may remain on server (read-only server): ${partialPath}`, category: 'upload' } });
             }
           } else {
-            this._post({ kind: 'uploadError', payload: { message } });
-            vscode.window.showErrorMessage(`SFTP Zip Gun upload failed: ${message}`);
+            log('error', `Upload failed for preset "${preset.name}": ${message}`);
+            this._post({ kind: 'uploadError', payload: { message: userMessage } });
+            vscode.window.showErrorMessage(`SFTP Zip Gun upload failed: ${userMessage}`);
 
             await this._stateManager.addToHistory({
               id: generateId(),
@@ -688,7 +696,7 @@ export class SftpPanel {
               files: uploadedBasenames,
               remoteFile: remoteBases[0] ?? '',
               result: 'error',
-              errorMessage: message,
+              errorMessage: userMessage,
             });
           }
         } finally {
@@ -718,7 +726,10 @@ export class SftpPanel {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log('error', `Connection test failed for "${presetName}": ${message}`);
-      this._post({ kind: 'connectionTested', payload: { presetName, success: false, message } });
+      this._post({
+        kind: 'connectionTested',
+        payload: { presetName, success: false, message: sanitizeUserFacingError(message) },
+      });
     } finally {
       await client.disconnect();
     }
@@ -759,7 +770,10 @@ export class SftpPanel {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log('error', `Remote browse failed for "${presetName}" at "${remotePath}": ${message}`);
-      this._post({ kind: 'log', payload: { level: 'error', text: `Remote browse failed: ${message}` } });
+      this._post({
+        kind: 'log',
+        payload: { level: 'error', text: `Remote browse failed: ${sanitizeUserFacingError(message)}` },
+      });
     } finally {
       await client.disconnect();
     }

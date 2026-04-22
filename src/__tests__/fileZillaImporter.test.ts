@@ -152,10 +152,55 @@ describe('parseFileZillaXml — duplicates and existingPresets', () => {
     expect(result.duplicates).toBe(1);
   });
 
+  it('skips duplicate server names from the same import batch', () => {
+    const xml = wrapInFileZilla(
+      makeServer({ name: 'Same Name', host: 'alpha.example.com', user: 'alpha' }) +
+      makeServer({ name: 'Same Name', host: 'beta.example.com', user: 'beta' })
+    );
+    const result = parseFileZillaXml(xml);
+    expect(result.presets).toHaveLength(1);
+    expect(result.presets[0].host).toBe('alpha.example.com');
+    expect(result.skipped).toBe(1);
+    expect(result.duplicates).toBe(0);
+  });
+
   it('returns empty result for invalid/empty XML', () => {
     const result = parseFileZillaXml('<NotFileZilla></NotFileZilla>');
     expect(result.presets).toHaveLength(0);
     expect(result.skipped).toBe(0);
     expect(result.duplicates).toBe(0);
+  });
+});
+
+describe('parseFileZillaXml — container traversal', () => {
+  it('imports servers nested inside FileZilla folders', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<FileZilla3>
+  <Servers>
+    <Folder>
+      <Name>Outer</Name>
+      <Folder>
+        <Name>Inner</Name>
+        ${makeServer({ name: 'Nested SFTP', host: 'nested.example.com', user: 'nested' })}
+      </Folder>
+    </Folder>
+  </Servers>
+</FileZilla3>`;
+
+    const result = parseFileZillaXml(xml);
+    expect(result.presets).toHaveLength(1);
+    expect(result.presets[0].name).toBe('Nested SFTP');
+    expect(result.presets[0].host).toBe('nested.example.com');
+  });
+
+  it('parses a root-level <Servers> container without FileZilla3 wrapper', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Servers>
+  ${makeServer({ name: 'Root Servers', host: 'root.example.com', user: 'root' })}
+</Servers>`;
+
+    const result = parseFileZillaXml(xml);
+    expect(result.presets).toHaveLength(1);
+    expect(result.presets[0].name).toBe('Root Servers');
   });
 });

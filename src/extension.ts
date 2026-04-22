@@ -6,6 +6,7 @@ import { SftpClient, AbortError } from './sftp/sftpClient';
 import { SftpPanel } from './webview/SftpPanel';
 import { generateId } from './types/messages';
 import { initLogger, log } from './logger';
+import { sanitizeUserFacingError } from './errors/userFacingError';
 
 // ---------------------------------------------------------------------------
 // Status bar
@@ -151,10 +152,12 @@ async function handleQuickUpload(
         vscode.window.showInformationMessage(`SFTP Zip Gun: ${fileName} → ${remotePath} (${done.bytesTransferred} bytes)`);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        const userMessage = sanitizeUserFacingError(message);
         const isAbort = err instanceof AbortError;
         if (!isAbort) {
+          log('error', `Quick upload failed for preset "${preset!.name}": ${message}`);
           statusBar.setError();
-          vscode.window.showErrorMessage(`SFTP Zip Gun upload failed: ${message}`);
+          vscode.window.showErrorMessage(`SFTP Zip Gun upload failed: ${userMessage}`);
           await stateManager.addToHistory({
             id: generateId(),
             timestamp: new Date().toISOString(),
@@ -163,7 +166,7 @@ async function handleQuickUpload(
             files: [fileName],
             remoteFile: remotePath,
             result: 'error',
-            errorMessage: message,
+            errorMessage: userMessage,
           });
         } else {
           statusBar.setIdle(preset?.name);

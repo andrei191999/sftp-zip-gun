@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import type { PresetMeta, SavePresetRequest } from '../types/messages';
+import { log } from '../logger';
+import { sanitizeKeyFileReadError } from '../errors/userFacingError';
 
 const CONFIG_KEY = 'presets';
 const CONFIG_SECTION = 'sftpZipGun';
@@ -61,7 +63,9 @@ export class PresetManager {
         try {
           privateKey = fs.readFileSync(keyPath);
         } catch (e) {
-          throw new Error(`Cannot read key file "${keyPath}": ${e instanceof Error ? e.message : String(e)}`);
+          const rawMessage = e instanceof Error ? e.message : String(e);
+          log('error', `Cannot read SSH key file "${keyPath}" for preset "${name}": ${rawMessage}`);
+          throw new Error(sanitizeKeyFileReadError());
         }
       }
       return { host, port, username, privateKey, passphrase };
@@ -78,7 +82,17 @@ export class PresetManager {
 
     // Strip any accidental secret fields from the meta object
     const { name, host, port, username, remoteDir, savedPaths, authType, keyPath, readOnly } = req.preset;
-    const safeMeta: PresetMeta = { name, host, port, username, remoteDir, savedPaths: savedPaths ?? [], authType, keyPath, readOnly };
+    const safeMeta: PresetMeta = {
+      name,
+      host,
+      port,
+      username,
+      remoteDir,
+      savedPaths: Array.isArray(savedPaths) ? savedPaths : [],
+      authType,
+      keyPath: typeof keyPath === 'string' ? keyPath : '',
+      readOnly: readOnly === true,
+    };
 
     if (req.isNew) {
       updated.push(safeMeta);
