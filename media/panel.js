@@ -463,6 +463,7 @@ function renderLogFilterBar(container) {
 
   var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
   var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
+  allBtn.title = 'Show all log categories';
   allBtn.addEventListener('click', function () {
     if (allActive) {
       CATS.forEach(function (c) { state.logFilter.delete(c); });
@@ -476,6 +477,7 @@ function renderLogFilterBar(container) {
   CATS.forEach(function (cat) {
     var active = state.logFilter.has(cat);
     var btn = el('button', { className: active ? 'active' : 'secondary' }, cat);
+    btn.title = 'Show only ' + cat + ' log entries';
     btn.addEventListener('click', function () {
       if (state.logFilter.has(cat)) { state.logFilter.delete(cat); }
       else { state.logFilter.add(cat); }
@@ -829,7 +831,7 @@ function renderUploadView(app) {
   var useOnceBtn = null;
 
   var rowSendTo = el('div', { className: 'row row-nowrap' });
-  rowSendTo.appendChild(el('label', null, 'Send to'));
+  rowSendTo.appendChild(el('label', { title: 'The remote directory where files will be uploaded' }, 'Send to'));
 
   if (preset) {
     sendToSelect = document.createElement('select');
@@ -927,7 +929,7 @@ function renderUploadView(app) {
 
   // ---- Mode toggle — three-way segmented button ----
   var rowMode = el('div', { className: 'row' });
-  rowMode.appendChild(el('label', null, 'Mode'));
+  rowMode.appendChild(el('label', { title: 'Controls how files are bundled: one zip, separate files, or per-group zips' }, 'Mode'));
   var modeBtn = document.createElement('button');
   modeBtn.className = 'mode-toggle';
   var modeSpans = [
@@ -1019,11 +1021,14 @@ function renderUploadView(app) {
     counterSpan = el('span', { style: 'opacity:0.7;' }, '');
     resetAllBtn = el('button', { className: 'secondary' }, '\u21ba Reset all');
     resetAllBtn.disabled = state.uploading;
+    resetAllBtn.title = 'Clear all file status badges and reset the file list';
     if (state.mode === 'zip_gun') {
       newGroupBtn = el('button', { className: 'secondary' }, '\u2192 New Group');
       newGroupBtn.disabled = state.uploading;
+      newGroupBtn.title = 'Create a new upload group \u2014 assign files to it using the Group column';
       clearGroupsBtn = el('button', { className: 'secondary' }, '\u00d7 Clear groups');
       clearGroupsBtn.disabled = state.uploading;
+      clearGroupsBtn.title = 'Remove all group assignments \u2014 files revert to Ungrouped';
       rowFileCtrl.appendChild(toggleSelectBtn);
       rowFileCtrl.appendChild(counterSpan);
       rowFileCtrl.appendChild(newGroupBtn);
@@ -1051,21 +1056,25 @@ function renderUploadView(app) {
     }).length + openFileRows.length;
     var selectedCount = state.files.filter(function (f) {
       if (f.isDirectory) { return false; }
-      if (isAnchorFile(f.name)) { return true; }
       var absPath = folder ? folder + '/' + f.name : f.name;
       return state.selectedFiles.has(absPath);
     }).length + openFileRows.filter(function(of) {
       return state.selectedFiles.has(of.filePath);
     }).length;
     var label;
+    var toggleTitle;
     if (selectedCount === 0) {
       label = '\u2611 Select all';
+      toggleTitle = 'Select all files in this folder';
     } else if (selectedCount === selectableCount) {
       label = '\u2610 Deselect all';
+      toggleTitle = 'Deselect all files';
     } else {
       label = '\u229f Select all';
+      toggleTitle = 'Select all files';
     }
     toggleSelectBtn.textContent = label;
+    toggleSelectBtn.title = toggleTitle;
     if (state.mode === 'zip_gun') {
       var groupedCount = state.fileGroups.length;
       var gc = state.groups.length;
@@ -1170,9 +1179,12 @@ function renderUploadView(app) {
         : 'no files selected');
     }
     uploadBtn.title = hints.join(' \u00b7 ');
+  } else if (!uploadBtn.disabled) {
+    uploadBtn.title = 'Upload the selected files to the remote server';
   }
   var stopBtn = el('button', { className: 'btn-hold', style: 'margin-left:12px;' }, 'HOLD');
   stopBtn.disabled = !state.uploading;
+  stopBtn.title = 'Abort the current upload';
   rowUpload.appendChild(uploadBtn);
   rowUpload.appendChild(stopBtn);
   app.appendChild(rowUpload);
@@ -1185,7 +1197,7 @@ function renderUploadView(app) {
 
   // ---- History toggle ----
   var rowHistBtn = el('div', { className: 'row' });
-  var historyBtn = el('button', { className: 'secondary' }, '\uD83D\uDCCB History');
+  var historyBtn = el('button', { className: 'secondary', title: 'View past upload sessions' }, '\uD83D\uDCCB History');
   rowHistBtn.appendChild(historyBtn);
   app.appendChild(rowHistBtn);
 
@@ -1517,14 +1529,16 @@ function buildFileTable(container, filterStr, openFileRows) {
   var thead = document.createElement('thead');
   var hrow = document.createElement('tr');
   if (state.mode === 'zip_gun') {
-    hrow.appendChild(el('th', null, ''));
+    var pinThAttrs = state.groupNaming === 'anchor' ? { title: 'Anchor \u2014 determines the zip archive filename for each group' } : null;
+    hrow.appendChild(el('th', pinThAttrs, ''));
     hrow.appendChild(el('th', null, 'Group'));
     hrow.appendChild(el('th', null, ''));
     hrow.appendChild(el('th', null, ''));
     hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
     hrow.appendChild(el('th', { className: 'status-th' }, ''));
   } else {
-    hrow.appendChild(el('th', null, ''));
+    var pinThAttrs2 = state.mode === 'zip_canon' ? { title: 'Anchor \u2014 determines the zip archive filename' } : null;
+    hrow.appendChild(el('th', pinThAttrs2, ''));
     hrow.appendChild(el('th', null, ''));
     hrow.appendChild(el('th', null, ''));
     hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
@@ -1543,10 +1557,15 @@ function buildFileTable(container, filterStr, openFileRows) {
     span.textContent = '\u26b2';
 
     if (state.mode === 'zip_gun') {
+      if (state.groupNaming !== 'anchor') {
+        span.style.visibility = 'hidden';
+        td.appendChild(span);
+        return td;
+      }
       var fg = state.fileGroups.find(function(x) { return x.filePath === absPath; });
       if (fg) {
         var pinned = state.groupAnchors[fg.groupId] === absPath;
-        span.title = pinned ? 'Group anchor' : 'Set as group anchor';
+        span.title = pinned ? 'Group anchor \u2014 this file\'s name is used as this group\'s zip archive name' : 'Set as group anchor \u2014 use this file\'s name for this group\'s zip archive';
         span.className = pinned ? 'pin-icon pin-icon-active' : 'pin-icon pin-icon-hover';
         if (!pinned) {
           (function(ap, gid) {
@@ -1559,14 +1578,14 @@ function buildFileTable(container, filterStr, openFileRows) {
       } else {
         span.className = 'pin-icon';
         span.style.opacity = '0.2';
-        span.title = 'Assign to a group to set anchor';
+        span.title = 'Assign this file to a group to set it as the naming anchor for that group\'s zip';
       }
     } else if (state.mode === 'zip_canon') {
       if (isLocalAnchor) {
-        span.title = 'Current anchor';
+        span.title = 'Anchor \u2014 this file\'s name is used as the zip archive name';
         span.className = 'pin-icon pin-icon-active';
       } else {
-        span.title = 'Set as anchor';
+        span.title = 'Set as anchor \u2014 use this file\'s name for the zip archive';
         span.className = 'pin-icon pin-icon-hover';
         (function(ap) {
           span.addEventListener('click', function () {
@@ -1667,19 +1686,14 @@ function buildFileTable(container, filterStr, openFileRows) {
     var td = document.createElement('td');
     var cb = document.createElement('input');
     cb.type = 'checkbox';
-    if (row.kind === 'local' && row.isAnchor) {
-      cb.disabled = true;
-      cb.checked = true;
-    } else {
-      cb.checked = state.selectedFiles.has(row.absPath);
-      (function(ap) {
-        cb.addEventListener('change', function() {
-          if (cb.checked) { state.selectedFiles.add(ap); }
-          else            { state.selectedFiles.delete(ap); }
-          if (_updateFileControlsFn) { _updateFileControlsFn(); }
-        });
-      }(row.absPath));
-    }
+    cb.checked = state.selectedFiles.has(row.absPath);
+    (function(ap) {
+      cb.addEventListener('change', function() {
+        if (cb.checked) { state.selectedFiles.add(ap); }
+        else            { state.selectedFiles.delete(ap); }
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+      });
+    }(row.absPath));
     td.appendChild(cb);
     return td;
   }
@@ -1789,6 +1803,7 @@ function buildFileTable(container, filterStr, openFileRows) {
       var zipNameSpan = document.createElement('span');
       zipNameSpan.className = 'group-zip-name';
       zipNameSpan.textContent = computeZipNameForGroup(group);
+      zipNameSpan.title = 'The archive filename that will be created on the server for this group';
       headerContent.appendChild(zipNameSpan);
 
       var countSpan = document.createElement('span');
@@ -1914,7 +1929,7 @@ function buildCollapsibleHeader(sectionKey, labelText, count) {
   var header = el('div', { className: 'section-header' });
   var arrow = collapsed ? '\u25b8' : '\u25be';
   var countStr = count !== undefined ? ' (' + count + ')' : '';
-  var headerBtn = el('button', { className: 'secondary section-toggle' }, arrow + ' ' + labelText + countStr);
+  var headerBtn = el('button', { className: 'secondary section-toggle', title: 'Click to collapse or expand' }, arrow + ' ' + labelText + countStr);
   headerBtn.addEventListener('click', function () {
     state.sectionCollapsed[sectionKey] = !state.sectionCollapsed[sectionKey];
     persistState();
@@ -2094,7 +2109,7 @@ function renderManageView(app) {
     var headerDiv = el('div', { style: 'display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;' });
     headerDiv.appendChild(el('strong', null, p.name));
     if (p.readOnly) {
-      headerDiv.appendChild(el('span', { className: 'badge-readonly' }, '\uD83D\uDD12 drop-box'));
+      headerDiv.appendChild(el('span', { className: 'badge-readonly', title: 'Stat, delete, and mkdir are disabled \u2014 used for drop-box servers that reject management commands' }, '\uD83D\uDD12 drop-box'));
     }
 
     // Connection status indicator
@@ -2108,7 +2123,7 @@ function renderManageView(app) {
     }
 
     if (state.newPresetNames[p.name]) {
-      headerDiv.appendChild(el('span', { className: 'badge-new' }, 'NEW'));
+      headerDiv.appendChild(el('span', { className: 'badge-new', title: 'This preset was added in the current session' }, 'NEW'));
     }
 
     card.appendChild(headerDiv);
@@ -2186,8 +2201,8 @@ function renderManageView(app) {
 
   // Action row
   var rowActions = el('div', { className: 'row' });
-  var addBtn = el('button', null, '+ Add Account');
-  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, 'Import from FileZilla\u2026');
+  var addBtn = el('button', { title: 'Create a new SFTP connection preset' }, '+ Add Account');
+  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;', title: 'Import SFTP accounts from a FileZilla Site Manager XML export' }, 'Import from FileZilla\u2026');
   importBtn.disabled = state.importPending;
   rowActions.appendChild(addBtn);
   rowActions.appendChild(importBtn);
