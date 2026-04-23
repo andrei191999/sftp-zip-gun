@@ -169,6 +169,9 @@ export class PanelUploadSession {
             now: () => new Date(),
           });
 
+          let pistolDoneCount = 0;
+          const pistolTotal = payload.mode === 'pistol_file' ? prepared.localPaths.length : 0;
+          const pistolWindow: string[] = [];
           this.uploading = true;
           const result = await runUploadRunner({
             preset,
@@ -208,6 +211,22 @@ export class PanelUploadSession {
                   currentFilePath: uploadProgress.currentFilePath,
                 },
               });
+            },
+            onFileUploaded: (localPath, _remotePath) => {
+              if (payload.mode === 'pistol_file' && pistolTotal > 1) {
+                pistolDoneCount++;
+                pistolWindow.push(path.basename(localPath));
+                if (pistolWindow.length > 3) { pistolWindow.shift(); }
+                this.post({
+                  kind: 'log',
+                  payload: {
+                    level: 'info',
+                    text: `${pistolDoneCount}/${pistolTotal} uploaded — ${pistolWindow.join(', ')}`,
+                    category: 'upload',
+                    replace: pistolDoneCount > 1,
+                  },
+                });
+              }
             },
           });
 

@@ -60,6 +60,7 @@ export interface UploadRunnerArgs {
   now?: () => Date;
   createId?: () => string;
   onProgress?: (progress: ProgressPayload & { remotePath: string }) => void;
+  onFileUploaded?: (localPath: string, remotePath: string) => void;
 }
 
 export interface UploadRunnerResult {
@@ -106,10 +107,10 @@ function buildRemoteTarget(remoteBase: string, localPath: string): string {
 }
 
 function buildSuccessRemoteFile(request: UploadRequest, remoteBases: string[], uploadedBasenames: string[]): string {
-  if (request.mode === 'zip_gun' && remoteBases.length === 1) {
-    return `${uploadedBasenames.join(' + ')} → ${remoteBases[0]}/`;
-  }
   if (remoteBases.length === 1) {
+    if (request.mode === 'zip_gun' || (request.mode === 'pistol_file' && uploadedBasenames.length > 1)) {
+      return `${uploadedBasenames.join(' + ')} → ${remoteBases[0]}/`;
+    }
     return `${remoteBases[0]}/${uploadedBasenames[uploadedBasenames.length - 1]}`;
   }
   return remoteBases.join(', ');
@@ -231,6 +232,7 @@ export async function runUploadRunner({
   now = defaultNow,
   createId = defaultCreateId,
   onProgress,
+  onFileUploaded,
 }: UploadRunnerArgs): Promise<UploadRunnerResult> {
   const startTime = now();
   const artifacts = prepared ?? await prepareUploadArtifacts({ request, buildZip: zipBuilder, now });
@@ -263,6 +265,7 @@ export async function runUploadRunner({
         });
         currentRemotePath = undefined;
         bytesTransferred += result.bytesTransferred;
+        onFileUploaded?.(localPath, remotePath);
       }
     }
     remoteFile = buildSuccessRemoteFile(request, remoteBases, artifacts.uploadedBasenames);

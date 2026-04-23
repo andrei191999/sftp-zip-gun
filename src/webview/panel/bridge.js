@@ -17,7 +17,7 @@ window.addEventListener('message', function (event) {
       }
       state.folderPath = p.folderPath;
       state.files = p.files;
-      if (isNewDataset) {
+      if (!currentNorm) {
         state.selectedFiles = getDefaultSelectedFiles(p.folderPath, p.files);
       }
       persistState();

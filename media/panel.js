@@ -31,8 +31,9 @@ let state = {
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
   newPresetNames: {},          // session-only: { [name]: true } for names added this session (cleared on edit)
   logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
+  logActiveTab: null,     // session-only: null | 'log' | 'history' — starts collapsed
+  historyFilter: { result: 'all', mode: 'all' },  // session-only
   history: [],              // HistoryEntry[]
-  showHistory: false,
   remoteBrowse: null,       // null | { path: string, entries: RemoteEntry[], loading: boolean }
   remoteBrowseCtx: null,    // 'send-to' | 'form-default' | 'form-bookmark' | null
   importPending: false,     // true while FileZilla import is in progress
@@ -52,6 +53,8 @@ let state = {
   uploadProgressText: null, // string | null — live upload progress shown in log box footer
   fileUploadStatuses: {},   // { [absPath]: StatusTrail } — pistol_file and zip_canon source rows
   groupUploadStatuses: {},  // { [groupId]: StatusTrail } — zip_gun group headers and member rows
+  modeFileStatuses:  {},   // { [mode]: fileUploadStatuses snapshot } — saved on mode switch
+  modeGroupStatuses: {},   // { [mode]: groupUploadStatuses snapshot } — saved on mode switch
   // Manage view state
   editingPreset: null,      // PresetMeta | null  (null = adding new)
   showPresetForm: false,
@@ -137,6 +140,17 @@ function formatTimestamp(d) {
     pad2(d.getMinutes()) +
     pad2(d.getSeconds())
   );
+}
+
+// Format a history entry ISO timestamp as "HH:MM" (today) or "Mon D HH:MM" (older)
+function formatHistoryTs(isoStr) {
+  var d = new Date(isoStr);
+  if (isNaN(d.getTime())) { return isoStr.slice(0, 16) || isoStr; }
+  var now = new Date();
+  var hh = pad2(d.getHours()), mm = pad2(d.getMinutes());
+  if (d.toDateString() === now.toDateString()) { return hh + ':' + mm; }
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + '\u00a0' + d.getDate() + ' ' + hh + ':' + mm;
 }
 
 var STATUS_GLYPHS = {
@@ -570,6 +584,39 @@ function clearEl(node) {
   while (node.firstChild) { node.removeChild(node.firstChild); }
 }
 
+function makeSvgEl(tag, attrs) {
+  var node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+  }
+  return node;
+}
+
+function iconAnchor() {
+  var svg = makeSvgEl('svg', {
+    width: '1em', height: '1em', viewBox: '0 0 16 16',
+    fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true',
+  });
+  svg.style.verticalAlign = 'middle';
+  svg.appendChild(makeSvgEl('circle', { cx: '8', cy: '3',  r: '2'  }));
+  svg.appendChild(makeSvgEl('line',   { x1: '8',  y1: '5',  x2: '8',  y2: '14' }));
+  svg.appendChild(makeSvgEl('line',   { x1: '3',  y1: '7',  x2: '13', y2: '7'  }));
+  svg.appendChild(makeSvgEl('line',   { x1: '8',  y1: '14', x2: '3',  y2: '11' }));
+  svg.appendChild(makeSvgEl('line',   { x1: '8',  y1: '14', x2: '13', y2: '11' }));
+  return svg;
+}
+
+function iconFolder() {
+  var svg = makeSvgEl('svg', {
+    width: '1em', height: '1em', viewBox: '0 0 16 16',
+    fill: 'currentColor', 'aria-hidden': 'true',
+  });
+  svg.style.verticalAlign = 'middle';
+  svg.appendChild(makeSvgEl('path', { d: 'M1 6V4h4l2 2h8v7H1V6Z' }));
+  return svg;
+}
+
 // Build a styled log box and append it to container. Returns the <pre>.
 function buildLogBox(container) {
   var pre = el('pre', { className: 'log-box' });
@@ -591,7 +638,7 @@ function buildLogBox(container) {
       if (entry.category) {
         var catSpan = document.createElement('span');
         catSpan.className = 'log-cat log-cat-' + entry.category;
-        catSpan.textContent = '[' + entry.category + '] ';
+        catSpan.textContent = entry.category;
         line.appendChild(catSpan);
       }
       var txt = document.createElement('span');
@@ -606,7 +653,7 @@ function buildLogBox(container) {
     pLine.className = 'log-progress';
     var pCat = document.createElement('span');
     pCat.className = 'log-cat log-cat-upload';
-    pCat.textContent = '[upload] ';
+    pCat.textContent = 'upload';
     var pTxt = document.createElement('span');
     pTxt.textContent = state.uploadProgressText;
     pLine.appendChild(pCat);
@@ -619,38 +666,7 @@ function buildLogBox(container) {
   return pre;
 }
 
-// Render a row of category filter toggle buttons above the log box.
-function renderLogFilterBar(container) {
-  var CATS = ['upload', 'conn', 'import', 'accounts', 'sys'];
-  var bar = el('div', { className: 'log-filter-row' });
-
-  var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
-  var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
-  allBtn.title = 'Show all log categories';
-  allBtn.addEventListener('click', function () {
-    if (allActive) {
-      CATS.forEach(function (c) { state.logFilter.delete(c); });
-    } else {
-      CATS.forEach(function (c) { state.logFilter.add(c); });
-    }
-    render();
-  });
-  bar.appendChild(allBtn);
-
-  CATS.forEach(function (cat) {
-    var active = state.logFilter.has(cat);
-    var btn = el('button', { className: active ? 'active' : 'secondary' }, cat);
-    btn.title = 'Show only ' + cat + ' log entries';
-    btn.addEventListener('click', function () {
-      if (state.logFilter.has(cat)) { state.logFilter.delete(cat); }
-      else { state.logFilter.add(cat); }
-      render();
-    });
-    bar.appendChild(btn);
-  });
-
-  container.appendChild(bar);
-}
+// renderLogSection is defined in renderers.js (needs buildHistory from that file).
 
 // ---------------------------------------------------------------------------
 // Message handling (HostToWebview)
@@ -675,7 +691,7 @@ window.addEventListener('message', function (event) {
       }
       state.folderPath = p.folderPath;
       state.files = p.files;
-      if (isNewDataset) {
+      if (!currentNorm) {
         state.selectedFiles = getDefaultSelectedFiles(p.folderPath, p.files);
       }
       persistState();
@@ -1113,8 +1129,10 @@ function renderUploadView(app) {
     var span = el('span', { className: 'mode-half mode-half-' + modeSlug + (state.mode === item.value ? ' active' : ''), title: item.title }, item.label);
     span.addEventListener('click', function () {
       if (item.value === state.mode) { return; }
-      // Save anchor for the mode we're leaving, restore for the mode we're entering
+      // Save anchor and upload statuses for the mode we're leaving
       state.modeAnchors[state.mode] = state.anchorFile;
+      state.modeFileStatuses[state.mode]  = Object.assign({}, state.fileUploadStatuses);
+      state.modeGroupStatuses[state.mode] = Object.assign({}, state.groupUploadStatuses);
       if (item.value === 'zip_gun' && state.mode !== 'zip_gun') {
         // Save canon/pistol selectedFiles so they survive the round-trip through zip_gun
         state.modeSelectedFiles[state.mode] = new Set(state.selectedFiles);
@@ -1155,6 +1173,9 @@ function renderUploadView(app) {
       state.mode = item.value;
       state.anchorFile = state.modeAnchors[item.value] || null;
       state.zipBaseName = null;
+      // Restore the destination mode's upload statuses
+      state.fileUploadStatuses  = Object.assign({}, state.modeFileStatuses[item.value]  || {});
+      state.groupUploadStatuses = Object.assign({}, state.modeGroupStatuses[item.value] || {});
       persistState();
       render();
     });
@@ -1360,24 +1381,8 @@ function renderUploadView(app) {
   rowUpload.appendChild(stopBtn);
   app.appendChild(rowUpload);
 
-  // ---- Log output ----
-  var rowLog = el('div', { className: 'row', style: 'flex-direction:column;align-items:stretch;' });
-  renderLogFilterBar(rowLog);
-  buildLogBox(rowLog);
-  app.appendChild(rowLog);
-
-  // ---- History toggle ----
-  var rowHistBtn = el('div', { className: 'row' });
-  var historyBtn = el('button', { className: 'secondary', title: 'View past upload sessions' }, '\uD83D\uDCCB History');
-  rowHistBtn.appendChild(historyBtn);
-  app.appendChild(rowHistBtn);
-
-  // ---- History section ----
-  var sectionHistory = el('div', { id: 'section-history' });
-  if (state.showHistory) {
-    buildHistory(sectionHistory);
-  }
-  app.appendChild(sectionHistory);
+  // ---- Log output + history ----
+  renderLogSection(app, true);
 
   // ---- Event listeners ----
 
@@ -1542,6 +1547,7 @@ function renderUploadView(app) {
   uploadBtn.addEventListener('click', function () {
     var pr = getSelectedPreset();
     if (!pr) { return; }
+    state.logActiveTab = 'log';  // open log pane whenever an upload fires
 
     var effectivePath = (state.selectedPath !== null && state.selectedPath !== '__add_new__')
       ? state.selectedPath
@@ -1606,10 +1612,6 @@ function renderUploadView(app) {
     render();
   });
 
-  historyBtn.addEventListener('click', function () {
-    state.showHistory = !state.showHistory;
-    render();
-  });
 }
 
 function updateFireState() {
@@ -1712,7 +1714,7 @@ function buildFileTable(container, filterStr, openFileRows) {
     var td = document.createElement('td');
     td.className = 'pin-cell';
     var span = document.createElement('span');
-    span.textContent = '\u26b2';
+    span.appendChild(iconAnchor());
 
     if (state.mode === 'zip_gun') {
       if (state.groupNaming !== 'anchor') {
@@ -1781,11 +1783,35 @@ function buildFileTable(container, filterStr, openFileRows) {
       sel.appendChild(opt);
     });
 
+    var newGrpOpt = document.createElement('option');
+    newGrpOpt.value = '__new__';
+    newGrpOpt.textContent = '+ New Group';
+    sel.appendChild(newGrpOpt);
+
     var curFg = state.fileGroups.find(function(fg) { return fg.filePath === absPath; });
     sel.value = curFg ? String(curFg.groupId) : '';
 
     (function(ap) {
       sel.addEventListener('change', function() {
+        // New Group: create a group and assign this file (or all selected files if bulk)
+        if (sel.value === '__new__') {
+          var targets = (state.selectedFiles.size > 1 && state.selectedFiles.has(ap))
+            ? Array.from(state.selectedFiles)
+            : [ap];
+          var newGid = state.nextGroupId++;
+          state.groups.push({ id: newGid, label: 'G' + newGid });
+          targets.forEach(function(fp) {
+            state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== fp; });
+            state.fileGroups.push({ filePath: fp, groupId: newGid });
+          });
+          state.groupAnchors[newGid] = targets.slice().sort()[0];
+          state.selectedFiles.clear();
+          persistState();
+          buildFileTable(container, filterStr, openFileRows);
+          if (_updateFileControlsFn) { _updateFileControlsFn(); }
+          return;
+        }
+
         var gid = parseInt(sel.value, 10);
 
         // Bulk-move: target is a valid group, multiple files selected, this file is selected
@@ -1862,7 +1888,7 @@ function buildFileTable(container, filterStr, openFileRows) {
     td.className = 'pin-cell';
     var swSpan = document.createElement('span');
     swSpan.className = 'hover-icon' + (state.uploading ? ' disabled' : '');
-    swSpan.textContent = '\u2197';
+    swSpan.appendChild(iconFolder());
     swSpan.title = state.uploading
       ? 'Folder switching is disabled while an upload is running'
       : 'Switch local folder to this file\u2019s folder';
@@ -2097,19 +2123,155 @@ function buildCollapsibleHeader(sectionKey, labelText, count) {
   return header;
 }
 
+// Collapsible log+history section with a unified bordered box.
+// withHistory: true in upload view, false in manage view.
+// logActiveTab: null | 'log' | 'history' — null collapses the box.
+// Clicking the active tab collapses; clicking the inactive tab switches.
+function renderLogSection(container, withHistory) {
+  var CATS = ['upload', 'conn', 'import', 'accounts', 'sys'];
+  var section = el('div', { className: 'log-section' });
+  var box     = el('div', { className: 'log-section-box' });
+
+  // In manage view, history tab is unavailable — treat it as log
+  var activeTab = (withHistory ? state.logActiveTab : (state.logActiveTab ? 'log' : null));
+
+  // --- Header: tab row (always) + filter row (only when a tab is active) ---
+  var header = el('div', { className: 'log-section-header' });
+
+  // Tab row — both buttons always present, each takes half the width
+  var tabRow = el('div', { className: 'log-tab-row' });
+
+  var logsBtn = el('button', {
+    className: activeTab === 'log' ? 'active' : 'secondary',
+    title: 'Show transfer log',
+  }, '\u2630 Session Logs');
+  logsBtn.addEventListener('click', function () {
+    state.logActiveTab = (activeTab === 'log') ? null : 'log';
+    render();
+  });
+  tabRow.appendChild(logsBtn);
+
+  if (withHistory) {
+    var histBtn = el('button', {
+      className: state.logActiveTab === 'history' ? 'active' : 'secondary',
+      title: 'View past upload sessions',
+    }, '\uD83D\uDCCB Upload History');
+    histBtn.addEventListener('click', function () {
+      state.logActiveTab = (state.logActiveTab === 'history') ? null : 'history';
+      render();
+    });
+    tabRow.appendChild(histBtn);
+  }
+
+  header.appendChild(tabRow);
+
+  // Filter row — shown below the tab row only when a tab is open
+  if (activeTab === 'log') {
+    var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
+    var filterBar = el('div', { className: 'log-filter-row' });
+    var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
+    allBtn.title = 'Show all log categories';
+    allBtn.addEventListener('click', function () {
+      if (allActive) { CATS.forEach(function (c) { state.logFilter.delete(c); }); }
+      else            { CATS.forEach(function (c) { state.logFilter.add(c); }); }
+      render();
+    });
+    filterBar.appendChild(allBtn);
+    CATS.forEach(function (cat) {
+      var active = state.logFilter.has(cat);
+      var btn = el('button', { className: active ? 'active' : 'secondary' }, cat);
+      btn.title = 'Toggle ' + cat + ' log entries';
+      btn.addEventListener('click', function () {
+        if (state.logFilter.has(cat)) { state.logFilter.delete(cat); }
+        else                          { state.logFilter.add(cat); }
+        render();
+      });
+      filterBar.appendChild(btn);
+    });
+    header.appendChild(filterBar);
+  } else if (activeTab === 'history') {
+    var histFilterBar = el('div', { className: 'log-filter-row' });
+    // Result group
+    [
+      { value: 'all',     label: 'All' },
+      { value: 'success', label: '\u2713 Success' },
+      { value: 'error',   label: '\u2717 Errors' },
+    ].forEach(function (f) {
+      var btn = el('button', { className: state.historyFilter.result === f.value ? 'active' : 'secondary' }, f.label);
+      btn.addEventListener('click', function () { state.historyFilter.result = f.value; render(); });
+      histFilterBar.appendChild(btn);
+    });
+    // Mode group — only when multiple distinct modes exist in history
+    var histModes = [];
+    state.history.forEach(function (e) { if (histModes.indexOf(e.mode) < 0) { histModes.push(e.mode); } });
+    if (histModes.length > 1) {
+      var MODE_LABELS = { zip_canon: 'canon', pistol_file: 'pistol', zip_gun: 'gun' };
+      histFilterBar.appendChild(el('span', { className: 'filter-sep' }, '\u00b7'));
+      var allModeBtn = el('button', { className: state.historyFilter.mode === 'all' ? 'active' : 'secondary' }, 'All modes');
+      allModeBtn.addEventListener('click', function () { state.historyFilter.mode = 'all'; render(); });
+      histFilterBar.appendChild(allModeBtn);
+      histModes.forEach(function (m) {
+        var btn = el('button', { className: state.historyFilter.mode === m ? 'active' : 'secondary' }, MODE_LABELS[m] || m);
+        btn.addEventListener('click', function () { state.historyFilter.mode = m; render(); });
+        histFilterBar.appendChild(btn);
+      });
+    }
+    header.appendChild(histFilterBar);
+  }
+
+  box.appendChild(header);
+
+  // --- Body: log OR history sharing the same space ---
+  if (activeTab === 'log') {
+    buildLogBox(box);
+  } else if (activeTab === 'history') {
+    var histSection = el('div', { className: 'log-history-section' });
+    buildHistory(histSection);
+    box.appendChild(histSection);
+  }
+
+  section.appendChild(box);
+  container.appendChild(section);
+}
+
 function buildHistory(container) {
   clearEl(container);
   if (state.history.length === 0) {
-    container.appendChild(el('p', null, 'No history yet.'));
+    container.appendChild(el('p', { className: 'history-empty' }, 'No history yet.'));
     return;
   }
-  state.history.forEach(function (entry) {
-    var div = el('div', { className: 'history-entry' + (entry.result === 'error' ? ' error' : '') });
-    div.appendChild(el('span', null, entry.timestamp + ' '));
-    div.appendChild(el('strong', null, entry.presetName));
-    div.appendChild(el('span', null, ' [' + entry.mode + '] ' + entry.files.join(', ') + ' \u2192 ' + entry.remoteFile));
-    var resultText = entry.result === 'success' ? ' \u2713' : ' \u2717 ' + (entry.errorMessage || '');
-    div.appendChild(el('span', null, resultText));
+  var visibleHistory = state.history.filter(function (entry) {
+    if (state.historyFilter.result === 'success' && entry.result !== 'success') { return false; }
+    if (state.historyFilter.result === 'error'   && entry.result !== 'error')   { return false; }
+    if (state.historyFilter.mode   !== 'all'     && entry.mode   !== state.historyFilter.mode) { return false; }
+    return true;
+  });
+  if (visibleHistory.length === 0) {
+    container.appendChild(el('p', { className: 'history-empty' }, 'No matching entries.'));
+    return;
+  }
+  var MODE_LABEL = { zip_canon: 'canon', pistol_file: 'pistol', zip_gun: 'gun' };
+  visibleHistory.forEach(function (entry) {
+    var isOk = entry.result === 'success';
+    var div = el('div', {
+      className: 'history-entry ' + (isOk ? 'success' : 'error'),
+      title: entry.errorMessage || '',
+    });
+    // Status glyph (✓ or ✗)
+    div.appendChild(el('span', { className: 'hentry-status hentry-status-' + entry.result },
+      isOk ? '\u2713' : '\u2717'));
+    // Timestamp (HH:MM today, Mon D HH:MM older)
+    div.appendChild(el('span', { className: 'hentry-ts' }, formatHistoryTs(entry.timestamp)));
+    // Account name
+    div.appendChild(el('span', { className: 'hentry-account' }, entry.presetName));
+    // Mode badge pill
+    div.appendChild(el('span', { className: 'hentry-mode hentry-mode-' + entry.mode },
+      MODE_LABEL[entry.mode] || entry.mode));
+    // File count (or single filename)
+    var fileLabel = entry.files.length === 1 ? entry.files[0] : entry.files.length + ' files';
+    div.appendChild(el('span', { className: 'hentry-files' }, fileLabel));
+    // Remote path — width:100% CSS forces it to its own line below the info row
+    div.appendChild(el('span', { className: 'hentry-path' }, '\u2192\u00a0' + entry.remoteFile));
     container.appendChild(div);
   });
 }
@@ -2378,10 +2540,7 @@ function renderManageView(app) {
   }
 
   // Log output
-  var rowLog = el('div', { className: 'row', style: 'flex-direction:column;align-items:stretch;' });
-  renderLogFilterBar(rowLog);
-  buildLogBox(rowLog);
-  app.appendChild(rowLog);
+  renderLogSection(app, false);
 
   // Listeners
   addBtn.addEventListener('click', function () {

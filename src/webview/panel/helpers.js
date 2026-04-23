@@ -13,6 +13,17 @@ function formatTimestamp(d) {
   );
 }
 
+// Format a history entry ISO timestamp as "HH:MM" (today) or "Mon D HH:MM" (older)
+function formatHistoryTs(isoStr) {
+  var d = new Date(isoStr);
+  if (isNaN(d.getTime())) { return isoStr.slice(0, 16) || isoStr; }
+  var now = new Date();
+  var hh = pad2(d.getHours()), mm = pad2(d.getMinutes());
+  if (d.toDateString() === now.toDateString()) { return hh + ':' + mm; }
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + '\u00a0' + d.getDate() + ' ' + hh + ':' + mm;
+}
+
 var STATUS_GLYPHS = {
   archive: '\ud83d\udddc', // clamp 🗜
   upload: '\u2191', // up arrow ↑
@@ -444,6 +455,39 @@ function clearEl(node) {
   while (node.firstChild) { node.removeChild(node.firstChild); }
 }
 
+function makeSvgEl(tag, attrs) {
+  var node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+  }
+  return node;
+}
+
+function iconAnchor() {
+  var svg = makeSvgEl('svg', {
+    width: '1em', height: '1em', viewBox: '0 0 16 16',
+    fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true',
+  });
+  svg.style.verticalAlign = 'middle';
+  svg.appendChild(makeSvgEl('circle', { cx: '8', cy: '3',  r: '2'  }));
+  svg.appendChild(makeSvgEl('line',   { x1: '8',  y1: '5',  x2: '8',  y2: '14' }));
+  svg.appendChild(makeSvgEl('line',   { x1: '3',  y1: '7',  x2: '13', y2: '7'  }));
+  svg.appendChild(makeSvgEl('line',   { x1: '8',  y1: '14', x2: '3',  y2: '11' }));
+  svg.appendChild(makeSvgEl('line',   { x1: '8',  y1: '14', x2: '13', y2: '11' }));
+  return svg;
+}
+
+function iconFolder() {
+  var svg = makeSvgEl('svg', {
+    width: '1em', height: '1em', viewBox: '0 0 16 16',
+    fill: 'currentColor', 'aria-hidden': 'true',
+  });
+  svg.style.verticalAlign = 'middle';
+  svg.appendChild(makeSvgEl('path', { d: 'M1 6V4h4l2 2h8v7H1V6Z' }));
+  return svg;
+}
+
 // Build a styled log box and append it to container. Returns the <pre>.
 function buildLogBox(container) {
   var pre = el('pre', { className: 'log-box' });
@@ -465,7 +509,7 @@ function buildLogBox(container) {
       if (entry.category) {
         var catSpan = document.createElement('span');
         catSpan.className = 'log-cat log-cat-' + entry.category;
-        catSpan.textContent = '[' + entry.category + '] ';
+        catSpan.textContent = entry.category;
         line.appendChild(catSpan);
       }
       var txt = document.createElement('span');
@@ -480,7 +524,7 @@ function buildLogBox(container) {
     pLine.className = 'log-progress';
     var pCat = document.createElement('span');
     pCat.className = 'log-cat log-cat-upload';
-    pCat.textContent = '[upload] ';
+    pCat.textContent = 'upload';
     var pTxt = document.createElement('span');
     pTxt.textContent = state.uploadProgressText;
     pLine.appendChild(pCat);
@@ -493,38 +537,7 @@ function buildLogBox(container) {
   return pre;
 }
 
-// Render a row of category filter toggle buttons above the log box.
-function renderLogFilterBar(container) {
-  var CATS = ['upload', 'conn', 'import', 'accounts', 'sys'];
-  var bar = el('div', { className: 'log-filter-row' });
-
-  var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
-  var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
-  allBtn.title = 'Show all log categories';
-  allBtn.addEventListener('click', function () {
-    if (allActive) {
-      CATS.forEach(function (c) { state.logFilter.delete(c); });
-    } else {
-      CATS.forEach(function (c) { state.logFilter.add(c); });
-    }
-    render();
-  });
-  bar.appendChild(allBtn);
-
-  CATS.forEach(function (cat) {
-    var active = state.logFilter.has(cat);
-    var btn = el('button', { className: active ? 'active' : 'secondary' }, cat);
-    btn.title = 'Show only ' + cat + ' log entries';
-    btn.addEventListener('click', function () {
-      if (state.logFilter.has(cat)) { state.logFilter.delete(cat); }
-      else { state.logFilter.add(cat); }
-      render();
-    });
-    bar.appendChild(btn);
-  });
-
-  container.appendChild(bar);
-}
+// renderLogSection is defined in renderers.js (needs buildHistory from that file).
 
 // ---------------------------------------------------------------------------
 // Message handling (HostToWebview)

@@ -31,8 +31,9 @@ let state = {
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
   newPresetNames: {},          // session-only: { [name]: true } for names added this session (cleared on edit)
   logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
+  logActiveTab: null,     // session-only: null | 'log' | 'history' — starts collapsed
+  historyFilter: { result: 'all', mode: 'all' },  // session-only
   history: [],              // HistoryEntry[]
-  showHistory: false,
   remoteBrowse: null,       // null | { path: string, entries: RemoteEntry[], loading: boolean }
   remoteBrowseCtx: null,    // 'send-to' | 'form-default' | 'form-bookmark' | null
   importPending: false,     // true while FileZilla import is in progress
@@ -52,6 +53,8 @@ let state = {
   uploadProgressText: null, // string | null — live upload progress shown in log box footer
   fileUploadStatuses: {},   // { [absPath]: StatusTrail } — pistol_file and zip_canon source rows
   groupUploadStatuses: {},  // { [groupId]: StatusTrail } — zip_gun group headers and member rows
+  modeFileStatuses:  {},   // { [mode]: fileUploadStatuses snapshot } — saved on mode switch
+  modeGroupStatuses: {},   // { [mode]: groupUploadStatuses snapshot } — saved on mode switch
   // Manage view state
   editingPreset: null,      // PresetMeta | null  (null = adding new)
   showPresetForm: false,

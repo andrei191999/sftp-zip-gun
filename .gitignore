@@ -42,7 +42,9 @@ spikes/
 lib/
 
 # Internal planning/spec artifacts
-docs/
+docs/*
+!docs/marketplace/
+!docs/marketplace/**
 openspec/
 
 # Local QA / smoke / Docker automation
