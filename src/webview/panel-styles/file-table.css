@@ -1,0 +1,187 @@
+/* ---------------------------------------------------------------------------
+   Connection status indicators (Manage view cards)
+--------------------------------------------------------------------------- */
+
+.conn-ok {
+  color: var(--vscode-testing-iconPassed);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.conn-fail {
+  color: var(--vscode-inputValidation-errorBorder);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   NEW badge (freshly-added accounts, session-transient)
+--------------------------------------------------------------------------- */
+
+.badge-new {
+  color: var(--vscode-testing-iconPassed);
+  border: 1px solid var(--vscode-testing-iconPassed);
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ---------------------------------------------------------------------------
+   Log category prefix tags
+--------------------------------------------------------------------------- */
+
+.log-cat {
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.log-cat-upload   { color: var(--vscode-terminal-ansiBlue); }
+.log-cat-conn     { color: var(--vscode-terminal-ansiGreen); }
+.log-cat-import   { color: var(--vscode-terminal-ansiMagenta); }
+.log-cat-accounts { color: var(--vscode-terminal-ansiYellow); }
+.log-cat-sys      { color: var(--vscode-terminal-ansiCyan); }
+
+/* ---------------------------------------------------------------------------
+   File table (upload view)
+--------------------------------------------------------------------------- */
+
+.file-table-wrap {
+  overflow-y: auto;
+  max-height: 280px;   /* ~10 rows × 28px */
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+  width: 100%;
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.file-table th,
+.file-table td {
+  padding: 3px 8px;
+  text-align: left;
+}
+
+.file-table th {
+  position: sticky;
+  top: 0;
+  background-color: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--vscode-input-border);
+  font-weight: 600;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.file-table td:first-child {
+  width: 24px;
+  text-align: center;
+}
+
+.file-table tbody tr:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
+/* ---------------------------------------------------------------------------
+   Live upload progress line (log box footer, shown during transfers)
+--------------------------------------------------------------------------- */
+
+.log-progress {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   Log category filter bar
+--------------------------------------------------------------------------- */
+
+.log-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.log-filter-row button {
+  font-size: 0.8em;
+  padding: 1px 7px;
+}
+
+/* ---------------------------------------------------------------------------
+   Collapsible file source sections
+--------------------------------------------------------------------------- */
+
+.section-header {
+  margin-top: 4px;
+}
+
+.section-toggle {
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+
+.section-body {
+  padding-left: 0;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.folder-path-cell {
+  font-size: 0.8em;
+  opacity: 0.6;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Local folder button — icon + path span; path clips from left (shows end) */
+.folder-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.folder-path-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.source-file-row .hover-actions {
+  visibility: hidden;
+  width: 20px;
+}
+
+.source-file-row:hover .hover-actions {
+  visibility: visible;
+}
+
+.hover-icon {
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1.1em;
+  padding: 0 4px;
+}
+
+.hover-icon:hover {
+  opacity: 1;
+}
+
+.hover-icon.disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+

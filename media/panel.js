@@ -1,3 +1,6 @@
+// state.js — extracted from media/panel.js
+// Shared webview state and persistence live here; this fragment must load first.
+
 // panel.js — SFTP Zip Gun webview UI
 //
 // All user-controlled values (preset names, file names, paths, log text) are inserted
@@ -40,10 +43,15 @@ let state = {
   groupNaming: 'anchor',    // 'anchor' | 'base-counter' | 'base-timestamp'
   namingBase: '',
   groupAnchors: {},         // { [groupId]: absPath } — per-group anchor
+  groupCollapsed: {},       // { [groupId]: boolean } — collapsed state per group
+  ungroupedCollapsed: false, // session-only: collapse the Ungrouped section in zip_gun
+  zipGunMemory: null,       // session-only snapshot: saved when leaving zip_gun with groups
   selectedPath: null,       // string | null — selected remote path ('__add_new__' = add-path mode)
   addPathValue: '',         // string — text in the "add new path" input
   pendingDeleteName: null,  // string | null — preset name awaiting inline delete confirmation
   uploadProgressText: null, // string | null — live upload progress shown in log box footer
+  fileUploadStatuses: {},   // { [absPath]: StatusTrail } — pistol_file and zip_canon source rows
+  groupUploadStatuses: {},  // { [groupId]: StatusTrail } — zip_gun group headers and member rows
   // Manage view state
   editingPreset: null,      // PresetMeta | null  (null = adding new)
   showPresetForm: false,
@@ -84,6 +92,10 @@ function pushLog(text, level, category) {
 var _lastSavedMode = null;
 var _lastSavedPresetName = null;
 var _updateFileControlsFn = null; // set by renderUploadView; called by buildFileTable checkbox handlers
+var _fileTableContainer  = null; // set by buildFileTable; used by baseInput live-update
+var _fileTableFilterStr  = '';   // set by buildFileTable
+var _fileTableOpenRows   = [];   // set by buildFileTable
+var _fireBtnRef = null;           // set by renderUploadView; updated by updateFireState()
 function saveViewState() {
   if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }
   _lastSavedMode = state.mode;
@@ -103,6 +115,7 @@ function persistState() {
       mode: state.mode,
       anchorFile: state.anchorFile || undefined,
       sectionCollapsed: state.sectionCollapsed,
+      groupCollapsed: Object.keys(state.groupCollapsed).length ? state.groupCollapsed : undefined,
     }
   });
 }
@@ -110,6 +123,9 @@ function persistState() {
 function getSelectedPreset() {
   return state.presets.find(function (p) { return p.name === state.selectedPresetName; }) || null;
 }
+
+// helpers.js — extracted from media/panel.js
+// Pure-ish helpers and DOM utilities. This fragment depends on state.js being loaded first.
 
 function formatTimestamp(d) {
   return (
@@ -123,6 +139,351 @@ function formatTimestamp(d) {
   );
 }
 
+var STATUS_GLYPHS = {
+  archive: '\ud83d\udddc', // clamp 🗜
+  upload: '\u2191', // up arrow ↑
+  queued: '\u2013', // en dash –
+  done: '\u2713', // check mark ✓
+  cancelled: '\u2298', // circled division slash ⊘
+  error: '\u2717', // ballot x ✗
+};
+
+function normalizeFolderPath(folderPath) {
+  return (folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+}
+
+function getFileName(path) {
+  return normalizeFolderPath(path).split('/').pop() || '';
+}
+
+function buildAbsoluteFilePath(folderPath, fileName) {
+  var folder = normalizeFolderPath(folderPath);
+  return folder ? folder + '/' + fileName : fileName;
+}
+
+function getDefaultSelectedFiles(folderPath, files) {
+  return new Set(
+    files
+      .filter(function(f) { return !f.isDirectory; })
+      .map(function(f) { return buildAbsoluteFilePath(folderPath, f.name); })
+  );
+}
+
+function clearUploadProgressRows() {
+  document.querySelectorAll('td.uploading-cell').forEach(function(td) {
+    td.classList.remove('uploading-cell');
+    var bar = td.querySelector('.upload-progress-bar');
+    if (bar) { bar.remove(); }
+  });
+}
+
+function applyProgressBar(td, percent) {
+  if (!td) { return; }
+  td.classList.add('uploading-cell');
+  var bar = td.querySelector('.upload-progress-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.className = 'upload-progress-bar';
+    td.appendChild(bar);
+  }
+  bar.style.width = percent + '%';
+}
+
+function resetLocalDatasetState() {
+  state.selectedFiles = new Set();
+  state.anchorFile = null;
+  state.modeAnchors = {};
+  state.modeSelectedFiles = {};
+  state.zipBaseName = null;
+  state.groups = [];
+  state.fileGroups = [];
+  state.groupAnchors = {};
+  state.groupCollapsed = {};
+  state.ungroupedCollapsed = false;
+  state.nextGroupId = 1;
+  state.zipGunMemory = null;
+  state.fileUploadStatuses = {};
+  state.groupUploadStatuses = {};
+  state.uploadProgressText = null;
+  clearUploadProgressRows();
+}
+
+function getParentFolderPath(filePath) {
+  return normalizeFolderPath(filePath).replace(/\/[^/]+$/, '');
+}
+
+function shouldKeepListedFilePath(filePath, folderPath, validLocalFilePaths) {
+  var normalizedFilePath = normalizeFolderPath(filePath);
+  return getParentFolderPath(normalizedFilePath) !== folderPath || validLocalFilePaths.has(normalizedFilePath);
+}
+
+function pruneListedSelectionSet(selectionLike, folderPath, validLocalFilePaths) {
+  var next = new Set();
+  if (!selectionLike) { return next; }
+  var values = selectionLike instanceof Set
+    ? Array.from(selectionLike)
+    : Array.isArray(selectionLike)
+      ? selectionLike
+      : [];
+  values.forEach(function(filePath) {
+    if (shouldKeepListedFilePath(filePath, folderPath, validLocalFilePaths)) {
+      next.add(filePath);
+    }
+  });
+  return next;
+}
+
+function reconcileListedGroupState(groups, fileGroups, groupAnchors) {
+  var nextGroups = groups.filter(function(group) {
+    return fileGroups.some(function(fileGroup) { return fileGroup.groupId === group.id; });
+  });
+  var validGroupIds = new Set(nextGroups.map(function(group) { return String(group.id); }));
+  var nextGroupAnchors = {};
+
+  Object.keys(groupAnchors || {}).forEach(function(groupId) {
+    if (!validGroupIds.has(String(groupId))) { return; }
+    var members = fileGroups.filter(function(fileGroup) { return String(fileGroup.groupId) === String(groupId); });
+    if (members.length === 0) { return; }
+    var currentAnchor = groupAnchors[groupId];
+    nextGroupAnchors[groupId] = members.some(function(fileGroup) { return fileGroup.filePath === currentAnchor; })
+      ? currentAnchor
+      : members[0].filePath;
+  });
+
+  return {
+    groups: nextGroups,
+    groupAnchors: nextGroupAnchors,
+    validGroupIds: validGroupIds,
+  };
+}
+
+function reconcileListedFolderState(folderPath, files) {
+  var normalizedFolderPath = normalizeFolderPath(folderPath);
+  var validLocalFilePaths = new Set(
+    files
+      .filter(function(file) { return !file.isDirectory; })
+      .map(function(file) { return buildAbsoluteFilePath(folderPath, file.name); })
+  );
+
+  state.selectedFiles = pruneListedSelectionSet(state.selectedFiles, normalizedFolderPath, validLocalFilePaths);
+
+  Object.keys(state.modeSelectedFiles || {}).forEach(function(mode) {
+    state.modeSelectedFiles[mode] = pruneListedSelectionSet(
+      state.modeSelectedFiles[mode],
+      normalizedFolderPath,
+      validLocalFilePaths
+    );
+  });
+
+  if (state.anchorFile && !shouldKeepListedFilePath(state.anchorFile, normalizedFolderPath, validLocalFilePaths)) {
+    state.anchorFile = null;
+  }
+
+  Object.keys(state.modeAnchors || {}).forEach(function(mode) {
+    var anchorFile = state.modeAnchors[mode];
+    if (anchorFile && !shouldKeepListedFilePath(anchorFile, normalizedFolderPath, validLocalFilePaths)) {
+      delete state.modeAnchors[mode];
+    }
+  });
+
+  state.fileGroups = state.fileGroups.filter(function(fileGroup) {
+    return shouldKeepListedFilePath(fileGroup.filePath, normalizedFolderPath, validLocalFilePaths);
+  });
+
+  var reconciledGroups = reconcileListedGroupState(state.groups, state.fileGroups, state.groupAnchors);
+  state.groups = reconciledGroups.groups;
+  state.groupAnchors = reconciledGroups.groupAnchors;
+
+  Object.keys(state.groupCollapsed || {}).forEach(function(groupId) {
+    if (!reconciledGroups.validGroupIds.has(String(groupId))) {
+      delete state.groupCollapsed[groupId];
+    }
+  });
+
+  Object.keys(state.groupUploadStatuses || {}).forEach(function(groupId) {
+    if (!reconciledGroups.validGroupIds.has(String(groupId))) {
+      delete state.groupUploadStatuses[groupId];
+    }
+  });
+
+  Object.keys(state.fileUploadStatuses || {}).forEach(function(filePath) {
+    if (!shouldKeepListedFilePath(filePath, normalizedFolderPath, validLocalFilePaths)) {
+      delete state.fileUploadStatuses[filePath];
+    }
+  });
+
+  if (state.groups.length === 0) {
+    state.nextGroupId = 1;
+  }
+
+  if (state.zipGunMemory) {
+    var memorySelectedFiles = Array.from(
+      pruneListedSelectionSet(state.zipGunMemory.selectedFiles, normalizedFolderPath, validLocalFilePaths)
+    );
+    var memoryFileGroups = (state.zipGunMemory.fileGroups || []).filter(function(fileGroup) {
+      return shouldKeepListedFilePath(fileGroup.filePath, normalizedFolderPath, validLocalFilePaths);
+    });
+    var memoryGroups = reconcileListedGroupState(
+      state.zipGunMemory.groups || [],
+      memoryFileGroups,
+      state.zipGunMemory.groupAnchors || {}
+    );
+
+    state.zipGunMemory = (memorySelectedFiles.length === 0 && memoryGroups.groups.length === 0)
+      ? null
+      : {
+          groups: memoryGroups.groups,
+          fileGroups: memoryFileGroups,
+          groupAnchors: memoryGroups.groupAnchors,
+          nextGroupId: memoryGroups.groups.length === 0 ? 1 : state.zipGunMemory.nextGroupId,
+          groupNaming: state.zipGunMemory.groupNaming,
+          namingBase: state.zipGunMemory.namingBase,
+          selectedFiles: memorySelectedFiles,
+        };
+  }
+}
+
+function buildZipGunGroupPayload() {
+  return state.groups.map(function(group) {
+    var groupFiles = state.fileGroups
+      .filter(function(fileGroup) { return fileGroup.groupId === group.id; })
+      .map(function(fileGroup) { return fileGroup.filePath; })
+      .sort();
+    var anchor = state.groupAnchors[group.id] || groupFiles[0] || '';
+    return {
+      id: group.id,
+      label: group.label,
+      files: groupFiles,
+      anchorFile: anchor,
+    };
+  }).filter(function(group) {
+    return group.files.length > 0;
+  });
+}
+
+function hasActionableZipGunGroups() {
+  return buildZipGunGroupPayload().length > 0;
+}
+
+function cloneStatusTrail(existing) {
+  return existing
+    ? {
+        batch: existing.batch || null,
+        zipped: !!existing.zipped,
+        archive: existing.archive || null,
+        upload: existing.upload || null,
+      }
+    : {
+        batch: null,
+        zipped: false,
+        archive: null,
+        upload: null,
+      };
+}
+
+function advanceStatusTrail(existing, status) {
+  var trail = cloneStatusTrail(existing);
+  if (status === 'queued') {
+    if (!trail.archive && !trail.upload) { trail.batch = 'queued'; }
+    return trail;
+  }
+  trail.batch = null;
+  if (status === 'zipping') {
+    trail.zipped = true;
+    trail.archive = 'zipping';
+    trail.upload = null;
+    return trail;
+  }
+  if (status === 'uploading') {
+    if (trail.zipped || trail.archive) {
+      trail.zipped = true;
+      trail.archive = (trail.archive === 'error' || trail.archive === 'cancelled') ? trail.archive : 'done';
+      trail.upload = 'uploading';
+    } else {
+      trail.upload = 'uploading';
+    }
+    return trail;
+  }
+  if (status === 'done') {
+    if (trail.zipped || trail.archive) {
+      trail.zipped = true;
+      trail.archive = (trail.archive === 'error' || trail.archive === 'cancelled') ? trail.archive : 'done';
+      trail.upload = 'done';
+    } else {
+      trail.upload = 'done';
+    }
+    return trail;
+  }
+  if (trail.zipped || trail.archive) {
+    trail.zipped = true;
+    if (trail.upload) {
+      trail.archive = (trail.archive === 'error' || trail.archive === 'cancelled') ? trail.archive : 'done';
+      trail.upload = status;
+    } else {
+      trail.archive = status;
+      trail.upload = null;
+    }
+  } else {
+    trail.upload = status;
+  }
+  return trail;
+}
+
+function createStatusIcon(stage, status) {
+  var span = document.createElement('span');
+  var glyph = STATUS_GLYPHS.upload;
+  if (stage === 'archive') {
+    glyph = STATUS_GLYPHS.archive;
+  } else if (stage === 'batch') {
+    glyph = STATUS_GLYPHS.queued;
+  } else if (status === 'done') {
+    glyph = STATUS_GLYPHS.done;
+  } else if (status === 'cancelled') {
+    glyph = STATUS_GLYPHS.cancelled;
+  } else if (status === 'error') {
+    glyph = STATUS_GLYPHS.error;
+  }
+  span.textContent = glyph;
+  span.className = 'status-icon status-icon-' + stage + ' status-icon-' + status;
+  if (status === 'zipping' || status === 'uploading') { span.className += ' spinner'; }
+  span.title = stage === 'archive'
+    ? (status === 'done' ? 'Archive ready' : status === 'cancelled' ? 'Archive cancelled' : status === 'error' ? 'Archive failed' : 'Creating archive')
+    : stage === 'batch'
+      ? 'Included in the batch but not transferred'
+      : (status === 'done' ? 'Upload complete' : status === 'cancelled' ? 'Upload cancelled' : status === 'error' ? 'Upload failed' : 'Uploading');
+  return span;
+}
+
+function renderStatusTrail(container, trail) {
+  clearEl(container);
+  if (!trail) { return; }
+  var holder = document.createElement('span');
+  holder.className = 'status-trail';
+  if (trail.batch && !trail.archive && !trail.upload) {
+    holder.appendChild(createStatusIcon('batch', trail.batch));
+  } else if (trail.zipped) {
+    if (trail.archive) { holder.appendChild(createStatusIcon('archive', trail.archive)); }
+    if (trail.upload) { holder.appendChild(createStatusIcon('upload', trail.upload)); }
+  } else if (trail.upload) {
+    holder.appendChild(createStatusIcon('upload', trail.upload));
+  }
+  if (holder.childNodes.length > 0) {
+    container.appendChild(holder);
+  }
+}
+
+function queueFileStatuses(filePaths) {
+  filePaths.forEach(function(filePath) {
+    state.fileUploadStatuses[filePath] = advanceStatusTrail(state.fileUploadStatuses[filePath], 'queued');
+  });
+}
+
+function queueGroupStatuses(groups) {
+  groups.forEach(function(group) {
+    state.groupUploadStatuses[group.id] = advanceStatusTrail(state.groupUploadStatuses[group.id], 'queued');
+  });
+}
+
 function formatBytes(n) {
   if (!n || n === 0) { return '\u2014'; }
   if (n < 1024) { return n + ' B'; }
@@ -132,14 +493,30 @@ function formatBytes(n) {
 
 function computeZipName() {
   if (!state.anchorFile) { return ''; }
-  var base = state.anchorFile.replace(/\\/g, '/').split('/').pop() || '';
+  var base = getFileName(state.anchorFile);
   var noExt = base.includes('.') ? base.slice(0, base.lastIndexOf('.')) : base;
   return noExt + '_' + formatTimestamp(new Date()) + '.zip';
 }
 
+function computeZipNameForGroup(group) {
+  var groupFiles = state.fileGroups.filter(function(fg) { return fg.groupId === group.id; });
+  if (groupFiles.length === 0) { return '(empty)'; }
+  var anchor = state.groupAnchors[group.id] || groupFiles[0].filePath;
+  var anchorBase = getFileName(anchor).replace(/\.[^.]+$/, '');
+  var groupIndex = state.groups.findIndex(function(g) { return g.id === group.id; }) + 1;
+  if (state.groupNaming === 'anchor') {
+    return anchorBase + '_YYYYMMDD.zip';
+  } else if (state.groupNaming === 'base-counter') {
+    var pad = String(state.groups.length).length;
+    return (state.namingBase || 'batch') + '_' + String(groupIndex).padStart(pad, '0') + '.zip';
+  } else {
+    return (state.namingBase || 'batch') + '_YYYYMMDD_HHmmss_' + groupIndex + '.zip';
+  }
+}
+
 function isAnchorFile(fileName) {
   if (!state.anchorFile) { return false; }
-  var base = state.anchorFile.replace(/\\/g, '/').split('/').pop();
+  var base = getFileName(state.anchorFile);
   return base === fileName;
 }
 
@@ -152,7 +529,7 @@ function autoGroupByName() {
   // Group selected files by filename stem (basename without extension)
   var stemMap = {};
   Array.from(state.selectedFiles).forEach(function(fp) {
-    var name = fp.replace(/\\/g, '/').split('/').pop() || fp;
+    var name = getFileName(fp) || fp;
     var stem = name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
     if (!stemMap[stem]) { stemMap[stem] = []; }
     stemMap[stem].push(fp);
@@ -249,6 +626,7 @@ function renderLogFilterBar(container) {
 
   var allActive = CATS.every(function (c) { return state.logFilter.has(c); });
   var allBtn = el('button', { className: allActive ? 'active' : 'secondary' }, 'All');
+  allBtn.title = 'Show all log categories';
   allBtn.addEventListener('click', function () {
     if (allActive) {
       CATS.forEach(function (c) { state.logFilter.delete(c); });
@@ -262,6 +640,7 @@ function renderLogFilterBar(container) {
   CATS.forEach(function (cat) {
     var active = state.logFilter.has(cat);
     var btn = el('button', { className: active ? 'active' : 'secondary' }, cat);
+    btn.title = 'Show only ' + cat + ' log entries';
     btn.addEventListener('click', function () {
       if (state.logFilter.has(cat)) { state.logFilter.delete(cat); }
       else { state.logFilter.add(cat); }
@@ -277,22 +656,28 @@ function renderLogFilterBar(container) {
 // Message handling (HostToWebview)
 // ---------------------------------------------------------------------------
 
+// bridge.js — extracted from media/panel.js
+// Host-to-webview message bridge. This fragment depends on helpers.js and renderers.js.
+
 window.addEventListener('message', function (event) {
   var msg = event.data;
   switch (msg.kind) {
 
     case 'filesListed': {
       var p = msg.payload;
+      var nextFolder = normalizeFolderPath(p.folderPath);
+      var currentNorm = normalizeFolderPath(state.folderPath);
+      var isNewDataset = !currentNorm || currentNorm !== nextFolder;
+      if (isNewDataset) {
+        resetLocalDatasetState();
+      } else {
+        reconcileListedFolderState(p.folderPath, p.files);
+      }
       state.folderPath = p.folderPath;
       state.files = p.files;
-      state.anchorFile = null;
-      state.zipBaseName = null;
-      var folder = (p.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-      state.selectedFiles = new Set(
-        p.files
-          .filter(function (f) { return !f.isDirectory; })
-          .map(function (f) { return folder ? folder + '/' + f.name : f.name; })
-      );
+      if (isNewDataset) {
+        state.selectedFiles = getDefaultSelectedFiles(p.folderPath, p.files);
+      }
       persistState();
       break;
     }
@@ -300,13 +685,66 @@ window.addEventListener('message', function (event) {
     case 'uploadProgress': {
       var p = msg.payload;
       state.uploadProgressText = (p.currentFile ? p.currentFile + ' \u2014 ' : '') + p.percent + '%';
-      break;
+      var fp = p.currentFilePath || null;
+      var matchedRows = [];
+      var rows = document.querySelectorAll('#file-list tr');
+      rows.forEach(function(row) {
+        var rowFilePath = row.dataset.filepath;
+        var match = rowFilePath && (fp
+          ? rowFilePath === fp
+          : getFileName(rowFilePath) === p.currentFile);
+        if (match) {
+          matchedRows.push(row);
+          applyProgressBar(row.querySelector('td.filename-cell'), p.percent);
+        }
+      });
+      if (matchedRows.length === 0) {
+        Object.keys(state.fileUploadStatuses).forEach(function(filePath) {
+          var trail = state.fileUploadStatuses[filePath];
+          var row = null;
+          if (!trail || !trail.zipped || trail.upload !== 'uploading') { return; }
+          row = Array.from(rows).find(function(candidate) {
+            return candidate.dataset.filepath === filePath;
+          }) || null;
+          if (!row) { return; }
+          applyProgressBar(row.querySelector('td.filename-cell'), p.percent);
+        });
+      }
+      return;  // skip render() — wiping the DOM removes the progress bar
+    }
+
+    case 'fileStatus': {
+      var fstatus = msg.payload;
+      if (fstatus.filePath != null) {
+        state.fileUploadStatuses[fstatus.filePath] = advanceStatusTrail(state.fileUploadStatuses[fstatus.filePath], fstatus.status);
+        var row = document.querySelector('#file-list tr[data-filepath="' + String(fstatus.filePath).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
+        if (row) {
+          var cell = row.querySelector('td.file-status-cell');
+          if (cell) { renderStatusTrail(cell, state.fileUploadStatuses[fstatus.filePath]); }
+        }
+      }
+      if (fstatus.groupId != null) {
+        state.groupUploadStatuses[fstatus.groupId] = advanceStatusTrail(state.groupUploadStatuses[fstatus.groupId], fstatus.status);
+        var hdr = document.querySelector('#file-list tr.group-header-row[data-groupid="' + fstatus.groupId + '"]');
+        if (hdr) {
+          var icon = hdr.querySelector('.group-status-icon');
+          if (icon) { renderStatusTrail(icon, state.groupUploadStatuses[fstatus.groupId]); }
+          // Propagate to all file rows in this group
+          var fileRows = document.querySelectorAll('#file-list tr[data-groupid="' + fstatus.groupId + '"]');
+          fileRows.forEach(function(row) {
+            var cell = row.querySelector('td.file-status-cell');
+            if (cell) { renderStatusTrail(cell, state.groupUploadStatuses[fstatus.groupId]); }
+          });
+        }
+      }
+      return;  // skip render()
     }
 
     case 'uploadDone': {
       var p = msg.payload;
       state.uploading = false;
       state.uploadProgressText = null;
+      clearUploadProgressRows();
       var bytesInfo = p.bytesTransferred > 0 ? ' \u00b7 ' + formatBytes(p.bytesTransferred) : '';
       pushLog('Complete \u2192 ' + p.remoteFile + bytesInfo, 'success', 'upload');
       break;
@@ -316,6 +754,7 @@ window.addEventListener('message', function (event) {
       var p = msg.payload;
       state.uploading = false;
       state.uploadProgressText = null;
+      clearUploadProgressRows();
       pushLog(p.message, 'error', 'upload');
       break;
     }
@@ -393,6 +832,7 @@ window.addEventListener('message', function (event) {
       if (p.mode)                                             { state.mode = p.mode; }
       if (p.anchorFile)                                       { state.anchorFile = p.anchorFile; }
       if (p.sectionCollapsed)                                 { state.sectionCollapsed = p.sectionCollapsed; }
+      if (p.groupCollapsed)                                   { state.groupCollapsed = p.groupCollapsed; }
       break;
     }
 
@@ -462,6 +902,9 @@ window.addEventListener('message', function (event) {
 // Main render
 // ---------------------------------------------------------------------------
 
+// renderers.js — extracted from media/panel.js
+// View rendering and DOM composition. This fragment depends on state.js and helpers.js.
+
 function renderTabBar(app) {
   var bar = el('div', { className: 'view-tab-bar' });
   [
@@ -509,12 +952,13 @@ function render() {
 
 function renderUploadView(app) {
   // ---- Account row ----
-  var rowDest = el('div', { className: 'row' });
+  var rowDest = el('div', { className: 'row row-nowrap' });
   rowDest.appendChild(el('label', null, 'Account'));
 
   var select = document.createElement('select');
   select.id = 'preset-select';
   select.style.flex = '1';
+  select.style.minWidth = '0';
   state.presets.forEach(function (p) {
     var opt = document.createElement('option');
     opt.value = p.name;
@@ -524,7 +968,28 @@ function renderUploadView(app) {
     if (p.name === state.selectedPresetName) { opt.selected = true; }
     select.appendChild(opt);
   });
+  var _selOpt = select.options[select.selectedIndex];
+  if (_selOpt) { select.title = _selOpt.textContent; }
   rowDest.appendChild(select);
+
+  var connBtn = el('button', { className: 'secondary conn-test-btn' });
+  var connIcon = el('span', { className: 'conn-icon' }, '\u21bb');
+  connBtn.appendChild(connIcon);
+  var _connStatus = state.connectionStatus[state.selectedPresetName];
+  if      (_connStatus === 'ok')      { connBtn.className += ' conn-test-ok';      connBtn.title = 'Connected'; }
+  else if (_connStatus === 'fail')    { connBtn.className += ' conn-test-fail';    connBtn.title = 'Connection failed'; }
+  else if (_connStatus === 'pending') { connBtn.className += ' conn-test-pending'; connBtn.title = 'Testing\u2026'; }
+  else                                { connBtn.title = 'Test connection'; }
+  connBtn.addEventListener('click', function() {
+    var pr = getSelectedPreset();
+    if (pr) {
+      state.connectionStatus[pr.name] = 'pending';
+      render();
+      vscode.postMessage({ kind: 'testConnection', payload: { presetName: pr.name } });
+    }
+  });
+  rowDest.appendChild(connBtn);
+
   app.appendChild(rowDest);
 
   // ---- Send to row ----
@@ -536,8 +1001,8 @@ function renderUploadView(app) {
   var bookmarkNewBtn = null;
   var useOnceBtn = null;
 
-  var rowSendTo = el('div', { className: 'row' });
-  rowSendTo.appendChild(el('label', null, 'Send to'));
+  var rowSendTo = el('div', { className: 'row row-nowrap' });
+  rowSendTo.appendChild(el('label', { title: 'The remote directory where files will be uploaded' }, 'Send to'));
 
   if (preset) {
     sendToSelect = document.createElement('select');
@@ -577,6 +1042,9 @@ function renderUploadView(app) {
     }
 
     rowSendTo.appendChild(sendToSelect);
+    sendToSelect.style.minWidth = '0';
+    var _sendOpt = sendToSelect.options[sendToSelect.selectedIndex];
+    if (_sendOpt) { sendToSelect.title = _sendOpt.textContent; }
 
     // Inline "Set as default" when a saved bookmark is the active selection
     if (state.selectedPath && state.selectedPath !== '__add_new__') {
@@ -616,11 +1084,12 @@ function renderUploadView(app) {
   }
 
   // ---- Local folder row ----
-  var rowFolder = el('div', { className: 'row' });
+  var rowFolder = el('div', { className: 'row row-nowrap' });
   rowFolder.appendChild(el('label', null, 'Local folder'));
   var changeFolderBtn = document.createElement('button');
   changeFolderBtn.className = 'secondary folder-btn';
   changeFolderBtn.title = state.folderPath || '';
+  changeFolderBtn.disabled = state.uploading;
   changeFolderBtn.appendChild(document.createTextNode('\uD83D\uDCC2 '));
   var _pathSpan = document.createElement('span');
   _pathSpan.className = 'folder-path-text';
@@ -631,7 +1100,7 @@ function renderUploadView(app) {
 
   // ---- Mode toggle — three-way segmented button ----
   var rowMode = el('div', { className: 'row' });
-  rowMode.appendChild(el('label', null, 'Mode'));
+  rowMode.appendChild(el('label', { title: 'Controls how files are bundled: one zip, separate files, or per-group zips' }, 'Mode'));
   var modeBtn = document.createElement('button');
   modeBtn.className = 'mode-toggle';
   var modeSpans = [
@@ -649,12 +1118,36 @@ function renderUploadView(app) {
       if (item.value === 'zip_gun' && state.mode !== 'zip_gun') {
         // Save canon/pistol selectedFiles so they survive the round-trip through zip_gun
         state.modeSelectedFiles[state.mode] = new Set(state.selectedFiles);
-        state.selectedFiles.clear();
-        state.groups       = [];
-        state.fileGroups   = [];
-        state.groupAnchors = {};
-        state.nextGroupId  = 1;
+        if (state.zipGunMemory !== null) {
+          // Restore last zip_gun snapshot
+          var mem = state.zipGunMemory;
+          state.groups        = mem.groups;
+          state.fileGroups    = mem.fileGroups;
+          state.groupAnchors  = mem.groupAnchors;
+          state.nextGroupId   = mem.nextGroupId;
+          state.groupNaming   = mem.groupNaming;
+          state.namingBase    = mem.namingBase;
+          state.selectedFiles = new Set(mem.selectedFiles);
+        } else {
+          state.selectedFiles.clear();
+          state.groups       = [];
+          state.fileGroups   = [];
+          state.groupAnchors = {};
+          state.nextGroupId  = 1;
+        }
       } else if (state.mode === 'zip_gun' && item.value !== 'zip_gun') {
+        // Save zip_gun state (only if groups are non-empty, so we don't wipe existing memory)
+        if (state.groups.length > 0) {
+          state.zipGunMemory = {
+            groups:       state.groups.slice(),
+            fileGroups:   state.fileGroups.slice(),
+            groupAnchors: Object.assign({}, state.groupAnchors),
+            nextGroupId:  state.nextGroupId,
+            groupNaming:  state.groupNaming,
+            namingBase:   state.namingBase,
+            selectedFiles: Array.from(state.selectedFiles),
+          };
+        }
         // Restore the target mode's previously saved files
         var saved = state.modeSelectedFiles[item.value];
         if (saved) { state.selectedFiles = new Set(saved); }
@@ -671,7 +1164,7 @@ function renderUploadView(app) {
   app.appendChild(rowMode);
 
   // ---- File sections (Open files merged with Local folder, shared search) ----
-  var localFolderNorm = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+  var localFolderNorm = normalizeFolderPath(state.folderPath);
   // Open files not already in the local folder
   var openFileRows = state.openFiles
     .filter(function(of) {
@@ -685,7 +1178,7 @@ function renderUploadView(app) {
 
   var localFileCount = state.files.filter(function(f){ return !f.isDirectory; }).length;
   var totalFileCount = localFileCount + openFileRows.length;
-  var localLabel = 'Files' + (state.folderPath ? ' \u2014 ' + (state.folderPath || '').replace(/\\/g, '/').split('/').pop() : '');
+  var localLabel = 'Files' + (state.folderPath ? ' \u2014 ' + getFileName(state.folderPath) : '');
   var sectionFiles = el('div', { id: 'section-files' });
   sectionFiles.appendChild(buildCollapsibleHeader('local', localLabel, totalFileCount));
 
@@ -694,13 +1187,19 @@ function renderUploadView(app) {
   var newGroupBtn = null, clearGroupsBtn = null, resetAllBtn = null;
   if (!state.sectionCollapsed.local && (state.files.length > 0 || openFileRows.length > 0)) {
     var localBody = el('div', { className: 'section-body' });
-    var rowFileCtrl = el('div', { className: 'row' });
+    var rowFileCtrl = el('div', { className: 'file-controls' });
     toggleSelectBtn = el('button', { className: 'secondary' }, '...');
-    counterSpan = el('span', { style: 'margin-left:6px;opacity:0.7;' }, '');
-    resetAllBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, '\u21ba Reset all');
+    counterSpan = el('span', { style: 'opacity:0.7;' }, '');
+    resetAllBtn = el('button', { className: 'secondary' }, '\u21ba Reset local state');
+    resetAllBtn.disabled = state.uploading;
+    resetAllBtn.title = 'Clear local file and group selections, anchors, and upload badges';
     if (state.mode === 'zip_gun') {
-      newGroupBtn = el('button', { className: 'secondary', style: 'margin-left:12px;' }, '\u2192 New Group');
-      clearGroupsBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, '\u00d7 Clear groups');
+      newGroupBtn = el('button', { className: 'secondary' }, '\u2192 New Group');
+      newGroupBtn.disabled = state.uploading;
+      newGroupBtn.title = 'Create a new upload group \u2014 assign files to it using the Group column';
+      clearGroupsBtn = el('button', { className: 'secondary' }, '\u00d7 Clear groups');
+      clearGroupsBtn.disabled = state.uploading;
+      clearGroupsBtn.title = 'Remove all group assignments \u2014 files revert to Ungrouped';
       rowFileCtrl.appendChild(toggleSelectBtn);
       rowFileCtrl.appendChild(counterSpan);
       rowFileCtrl.appendChild(newGroupBtn);
@@ -711,7 +1210,7 @@ function renderUploadView(app) {
       rowFileCtrl.appendChild(counterSpan);
       rowFileCtrl.appendChild(resetAllBtn);
     }
-    fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'margin-left:8px;flex:1;' });
+    fileFilter = el('input', { type: 'text', placeholder: 'Filter files\u2026', style: 'flex:1;min-width:120px;' });
     rowFileCtrl.appendChild(fileFilter);
     localBody.appendChild(rowFileCtrl);
     fileListContainer = el('div', { id: 'file-list' });
@@ -722,36 +1221,44 @@ function renderUploadView(app) {
 
   function updateFileControls() {
     if (!toggleSelectBtn || !counterSpan) { return; }
-    var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+    var folder = normalizeFolderPath(state.folderPath);
     var selectableCount = state.files.filter(function (f) {
-      return !f.isDirectory && !isAnchorFile(f.name);
+      return !f.isDirectory;
     }).length + openFileRows.length;
     var selectedCount = state.files.filter(function (f) {
-      if (f.isDirectory || isAnchorFile(f.name)) { return false; }
+      if (f.isDirectory) { return false; }
       var absPath = folder ? folder + '/' + f.name : f.name;
       return state.selectedFiles.has(absPath);
     }).length + openFileRows.filter(function(of) {
       return state.selectedFiles.has(of.filePath);
     }).length;
     var label;
+    var toggleTitle;
     if (selectedCount === 0) {
       label = '\u2611 Select all';
+      toggleTitle = 'Select all files in this folder';
     } else if (selectedCount === selectableCount) {
       label = '\u2610 Deselect all';
+      toggleTitle = 'Deselect all files';
     } else {
       label = '\u229f Select all';
+      toggleTitle = 'Select all files';
     }
     toggleSelectBtn.textContent = label;
+    toggleSelectBtn.title = toggleTitle;
     if (state.mode === 'zip_gun') {
-      var assignedCount = state.fileGroups.filter(function(fg) { return state.selectedFiles.has(fg.filePath); }).length;
+      var groupedCount = state.fileGroups.length;
       var gc = state.groups.length;
-      counterSpan.textContent = assignedCount + '/' + selectableCount + ' in ' + gc + ' group' + (gc !== 1 ? 's' : '');
+      var checkedCount = state.selectedFiles.size;
+      var checkedLabel = checkedCount > 0 ? ' (' + checkedCount + ' selected)' : '';
+      counterSpan.textContent = groupedCount + ' files in ' + gc + ' group' + (gc !== 1 ? 's' : '') + checkedLabel;
     } else {
       counterSpan.textContent = selectedCount + ' / ' + selectableCount;
     }
+    updateFireState();
   }
   _updateFileControlsFn = updateFileControls;
-  if (!state.sectionCollapsed.local && state.files.length > 0) {
+  if (!state.sectionCollapsed.local && (state.files.length > 0 || openFileRows.length > 0)) {
     updateFileControls();
   }
 
@@ -791,14 +1298,17 @@ function renderUploadView(app) {
       rowBase.appendChild(el('label', null, 'Base name'));
       var baseInput = el('input', { type: 'text', placeholder: 'e.g. batch', style: 'flex:1;' });
       baseInput.value = state.namingBase || '';
-      baseInput.addEventListener('input', function() { state.namingBase = baseInput.value; });
+      baseInput.addEventListener('input', function() {
+        state.namingBase = baseInput.value;
+        if (_fileTableContainer) { buildFileTable(_fileTableContainer, _fileTableFilterStr, _fileTableOpenRows); }
+      });
       rowBase.appendChild(baseInput);
       app.appendChild(rowBase);
     }
   }
 
   // ---- ZIP name row ----
-  var anchorBase = (state.anchorFile || '').replace(/\\/g, '/').split('/').pop() || '';
+  var anchorBase = getFileName(state.anchorFile);
   var anchorStem = anchorBase.includes('.') ? anchorBase.slice(0, anchorBase.lastIndexOf('.')) : anchorBase;
   var sectionZip = el('div', { id: 'section-zipname', style: 'margin-top:12px;' });
   var zipNameInput = null;
@@ -822,23 +1332,13 @@ function renderUploadView(app) {
   }
   app.appendChild(sectionZip);
 
-  // ---- Ungrouped files warning (ZIP Gun mode) ----
-  if (state.mode === 'zip_gun' && state.selectedFiles.size > 0) {
-    var ungroupedCount = Array.from(state.selectedFiles).filter(function(fp) {
-      return !state.fileGroups.find(function(fg) { return fg.filePath === fp; });
-    }).length;
-    if (ungroupedCount > 0) {
-      var warnRow = el('div', { className: 'row group-warning' });
-      warnRow.textContent = ungroupedCount + ' checked file' + (ungroupedCount !== 1 ? 's' : '') + ' have no group and will be excluded.';
-      app.appendChild(warnRow);
-    }
-  }
 
   // ---- Upload controls ----
   var rowUpload = el('div', { className: 'row', style: 'justify-content:center;' });
   var uploadBtn = el('button', { className: 'btn-fire' }, 'FIRE');
+  _fireBtnRef = uploadBtn;
   var noFiles = state.mode === 'zip_gun'
-    ? !state.fileGroups.some(function(fg) { return state.selectedFiles.has(fg.filePath); })
+    ? !hasActionableZipGunGroups()
     : state.selectedFiles.size === 0;
   uploadBtn.disabled = state.uploading || !state.selectedPresetName || noFiles;
   if (uploadBtn.disabled && !state.uploading) {
@@ -850,9 +1350,12 @@ function renderUploadView(app) {
         : 'no files selected');
     }
     uploadBtn.title = hints.join(' \u00b7 ');
+  } else if (!uploadBtn.disabled) {
+    uploadBtn.title = 'Upload the selected files to the remote server';
   }
   var stopBtn = el('button', { className: 'btn-hold', style: 'margin-left:12px;' }, 'HOLD');
   stopBtn.disabled = !state.uploading;
+  stopBtn.title = 'Abort the current upload';
   rowUpload.appendChild(uploadBtn);
   rowUpload.appendChild(stopBtn);
   app.appendChild(rowUpload);
@@ -865,7 +1368,7 @@ function renderUploadView(app) {
 
   // ---- History toggle ----
   var rowHistBtn = el('div', { className: 'row' });
-  var historyBtn = el('button', { className: 'secondary' }, '\uD83D\uDCCB History');
+  var historyBtn = el('button', { className: 'secondary', title: 'View past upload sessions' }, '\uD83D\uDCCB History');
   rowHistBtn.appendChild(historyBtn);
   app.appendChild(rowHistBtn);
 
@@ -882,6 +1385,7 @@ function renderUploadView(app) {
     state.selectedPresetName = select.value;
     state.selectedPath = null;
     state.addPathValue = '';
+    delete state.connectionStatus[select.value];
     persistState();
     render();
   });
@@ -942,29 +1446,47 @@ function renderUploadView(app) {
 
   if (!state.sectionCollapsed.local && fileListContainer) {
     toggleSelectBtn.addEventListener('click', function () {
-      var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-      var selectableFiles = state.files.filter(function (f) { return !f.isDirectory && !isAnchorFile(f.name); });
+      var folder = normalizeFolderPath(state.folderPath);
+      var selectableFiles = state.files.filter(function (f) { return !f.isDirectory; });
+      var isGrouped = function(ap) {
+        return state.mode === 'zip_gun' && state.fileGroups.some(function(fg) { return fg.filePath === ap; });
+      };
+      // In zip_gun, "all selected" means all UNGROUPED files are selected
       var allLocalSelected = selectableFiles.every(function (f) {
         var absPath = folder ? folder + '/' + f.name : f.name;
+        if (isGrouped(absPath)) { return true; } // grouped files don't count
         return state.selectedFiles.has(absPath);
       });
       var allOpenSelected = openFileRows.every(function (of) {
+        if (isGrouped(of.filePath)) { return true; }
         return state.selectedFiles.has(of.filePath);
       });
+      var ungroupedLocalCount = state.mode === 'zip_gun'
+        ? selectableFiles.filter(function(f) { return !isGrouped(folder ? folder + '/' + f.name : f.name); }).length
+        : selectableFiles.length;
+      var ungroupedOpenCount = state.mode === 'zip_gun'
+        ? openFileRows.filter(function(of) { return !isGrouped(of.filePath); }).length
+        : openFileRows.length;
       var allSelected = allLocalSelected && allOpenSelected
-                     && (selectableFiles.length + openFileRows.length > 0);
+                     && (ungroupedLocalCount + ungroupedOpenCount > 0);
       if (allSelected) {
+        // Deselect all (clear selection regardless of group status)
         selectableFiles.forEach(function (f) {
           var absPath = folder ? folder + '/' + f.name : f.name;
           state.selectedFiles.delete(absPath);
         });
         openFileRows.forEach(function (of) { state.selectedFiles.delete(of.filePath); });
       } else {
+        // Select only ungrouped files in zip_gun, all files otherwise
         selectableFiles.forEach(function (f) {
           var absPath = folder ? folder + '/' + f.name : f.name;
+          if (isGrouped(absPath)) { return; }
           state.selectedFiles.add(absPath);
         });
-        openFileRows.forEach(function (of) { state.selectedFiles.add(of.filePath); });
+        openFileRows.forEach(function (of) {
+          if (isGrouped(of.filePath)) { return; }
+          state.selectedFiles.add(of.filePath);
+        });
       }
       buildFileTable(fileListContainer, fileFilter.value, openFileRows);
       updateFileControls();
@@ -976,20 +1498,23 @@ function renderUploadView(app) {
 
     if (newGroupBtn) {
       newGroupBtn.addEventListener('click', function() {
-        // Assign all selected-but-ungrouped files to a new group
-        var ungrouped = Array.from(state.selectedFiles).filter(function(fp) {
-          return !state.fileGroups.find(function(fg) { return fg.filePath === fp; });
-        });
-        if (ungrouped.length === 0) { return; }
+        var checked = Array.from(state.selectedFiles);
+        if (checked.length === 0) { return; }
         var gid = state.nextGroupId++;
         state.groups.push({ id: gid, label: 'G' + gid });
-        ungrouped.forEach(function(fp) {
+        var affectedGroups = new Set();
+        checked.forEach(function(fp) {
+          var existing = state.fileGroups.find(function(fg) { return fg.filePath === fp; });
+          if (existing) { affectedGroups.add(existing.groupId); }
+          state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== fp; });
           state.fileGroups.push({ filePath: fp, groupId: gid });
         });
-        // Auto-anchor for the new group
-        var sortedUngrouped = ungrouped.slice().sort();
-        state.groupAnchors[gid] = sortedUngrouped[0];
+        affectedGroups.forEach(reconcileGroup);
+        state.groupAnchors[gid] = checked.slice().sort()[0];
+        state.selectedFiles.clear();
+        persistState();
         buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '', openFileRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
       });
     }
 
@@ -1007,14 +1532,7 @@ function renderUploadView(app) {
 
     if (resetAllBtn) {
       resetAllBtn.addEventListener('click', function() {
-        state.selectedFiles.clear();
-        state.anchorFile   = null;
-        state.modeAnchors  = {};
-        state.fileGroups   = [];
-        state.groups       = [];
-        state.groupAnchors = {};
-        state.nextGroupId  = 1;
-        state.zipBaseName  = null;
+        resetLocalDatasetState();
         persistState();
         render();
       });
@@ -1030,18 +1548,18 @@ function renderUploadView(app) {
       : (pr.remoteDir || '/');
 
     if (state.mode === 'zip_gun') {
-      // Build groups payload
-      var groupPayload = state.groups.map(function(g) {
-        var groupFiles = state.fileGroups
-          .filter(function(fg) { return fg.groupId === g.id && state.selectedFiles.has(fg.filePath); })
-          .map(function(fg) { return fg.filePath; })
-          .sort();
-        var anchor = state.groupAnchors[g.id] || groupFiles[0] || '';
-        return { id: g.id, label: g.label, files: groupFiles, anchorFile: anchor };
-      }).filter(function(g) { return g.files.length > 0; });
+      var groupPayload = buildZipGunGroupPayload();
 
-      if (groupPayload.length === 0) { return; }
+      if (groupPayload.length === 0) {
+        pushLog('ZIP Gun needs at least one non-empty group before upload can start.', 'warn', 'upload');
+        render();
+        return;
+      }
       state.uploading = true;
+      state.fileUploadStatuses = {};
+      state.groupUploadStatuses = {};
+      queueFileStatuses(Array.from(state.selectedFiles));
+      queueGroupStatuses(groupPayload);
       pushLog(pr.name + ' \u2014 ZIP Gun upload (' + groupPayload.length + ' group' + (groupPayload.length !== 1 ? 's' : '') + ')', 'session');
       vscode.postMessage({
         kind: 'upload',
@@ -1075,6 +1593,9 @@ function renderUploadView(app) {
       payload.archiveName = state.zipBaseName || anchorStem || '';
     }
     state.uploading = true;
+    state.fileUploadStatuses = {};
+    state.groupUploadStatuses = {};
+    queueFileStatuses(filesToUpload);
     pushLog(pr.name + ' \u2014 ' + (({ zip_canon: 'ZIP Canon', pistol_file: 'Pistol File', zip_gun: 'ZIP Gun' })[state.mode] || state.mode) + ' upload', 'session');
     vscode.postMessage({ kind: 'upload', payload: payload });
     render();
@@ -1091,14 +1612,43 @@ function renderUploadView(app) {
   });
 }
 
+function updateFireState() {
+  if (!_fireBtnRef) { return; }
+  var noFiles = state.mode === 'zip_gun'
+    ? !hasActionableZipGunGroups()
+    : state.selectedFiles.size === 0;
+  _fireBtnRef.disabled = state.uploading || !state.selectedPresetName || noFiles;
+  if (_fireBtnRef.disabled && !state.uploading) {
+    var hints = [];
+    if (!state.selectedPresetName) { hints.push('no account selected'); }
+    if (noFiles) {
+      hints.push(state.mode === 'zip_gun' ? 'check files and assign to groups' : 'no files selected');
+    }
+    _fireBtnRef.title = hints.join(' \u00b7 ');
+  } else {
+    _fireBtnRef.title = '';
+  }
+}
+
+function reconcileGroup(groupId) {
+  var members = state.fileGroups.filter(function(fg) { return fg.groupId === groupId; });
+  if (members.length === 0) {
+    delete state.groupAnchors[groupId];
+  } else if (state.groupAnchors[groupId] && !members.some(function(fg) { return fg.filePath === state.groupAnchors[groupId]; })) {
+    state.groupAnchors[groupId] = members[0].filePath;
+  }
+}
+
 // openFileRows: optional array of {filePath, fileName, folderPath} — open VS Code tabs not in local folder.
-// Column order: [checkbox][pin ⚲][↗ switch-folder][filename][group dropdown (zip_gun only)]
 function buildFileTable(container, filterStr, openFileRows) {
+  _fileTableContainer = container;
+  _fileTableFilterStr = filterStr || '';
+  _fileTableOpenRows  = openFileRows || [];
   var _prevWrap = container.querySelector('.file-table-wrap');
   var _prevScroll = _prevWrap ? _prevWrap.scrollTop : 0;
   clearEl(container);
   var filter = (filterStr || '').toLowerCase();
-  var folder = (state.folderPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+  var folder = normalizeFolderPath(state.folderPath);
 
   var localVisible = state.files.filter(function (f) {
     if (f.isDirectory) { return false; }
@@ -1109,19 +1659,48 @@ function buildFileTable(container, filterStr, openFileRows) {
     return !filter || of.fileName.toLowerCase().includes(filter);
   });
 
-  if (localVisible.length === 0 && openVisible.length === 0) { return; }
+  if (localVisible.length === 0 && openVisible.length === 0 && (state.mode !== 'zip_gun' || state.groups.length === 0)) { return; }
+
+  var visibleRows = [];
+  openVisible.forEach(function(of) {
+    visibleRows.push({
+      kind: 'open',
+      absPath: of.filePath,
+      fileName: of.fileName,
+      folderPath: of.folderPath,
+      isAnchor: false
+    });
+  });
+  localVisible.forEach(function(f) {
+    visibleRows.push({
+      kind: 'local',
+      absPath: folder ? folder + '/' + f.name : f.name,
+      fileName: f.name,
+      folderPath: folder,
+      isAnchor: isAnchorFile(f.name)
+    });
+  });
 
   var wrap = el('div', { className: 'file-table-wrap' });
   var table = el('table', { className: 'file-table' });
 
   var thead = document.createElement('thead');
   var hrow = document.createElement('tr');
-  hrow.appendChild(el('th', null, ''));  // checkbox
-  hrow.appendChild(el('th', null, ''));  // pin ⚲
-  hrow.appendChild(el('th', null, ''));  // ↗ switch-folder
-  hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
   if (state.mode === 'zip_gun') {
+    var pinThAttrs = state.groupNaming === 'anchor' ? { title: 'Anchor \u2014 determines the zip archive filename for each group' } : null;
+    hrow.appendChild(el('th', pinThAttrs, ''));
     hrow.appendChild(el('th', null, 'Group'));
+    hrow.appendChild(el('th', null, ''));
+    hrow.appendChild(el('th', null, ''));
+    hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
+    hrow.appendChild(el('th', { className: 'status-th' }, ''));
+  } else {
+    var pinThAttrs2 = state.mode === 'zip_canon' ? { title: 'Anchor \u2014 determines the zip archive filename' } : null;
+    hrow.appendChild(el('th', pinThAttrs2, ''));
+    hrow.appendChild(el('th', null, ''));
+    hrow.appendChild(el('th', null, ''));
+    hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
+    hrow.appendChild(el('th', { className: 'status-th' }, ''));
   }
   thead.appendChild(hrow);
   table.appendChild(thead);
@@ -1136,10 +1715,15 @@ function buildFileTable(container, filterStr, openFileRows) {
     span.textContent = '\u26b2';
 
     if (state.mode === 'zip_gun') {
+      if (state.groupNaming !== 'anchor') {
+        span.style.visibility = 'hidden';
+        td.appendChild(span);
+        return td;
+      }
       var fg = state.fileGroups.find(function(x) { return x.filePath === absPath; });
       if (fg) {
         var pinned = state.groupAnchors[fg.groupId] === absPath;
-        span.title = pinned ? 'Group anchor' : 'Set as group anchor';
+        span.title = pinned ? 'Group anchor \u2014 this file\'s name is used as this group\'s zip archive name' : 'Set as group anchor \u2014 use this file\'s name for this group\'s zip archive';
         span.className = pinned ? 'pin-icon pin-icon-active' : 'pin-icon pin-icon-hover';
         if (!pinned) {
           (function(ap, gid) {
@@ -1152,14 +1736,14 @@ function buildFileTable(container, filterStr, openFileRows) {
       } else {
         span.className = 'pin-icon';
         span.style.opacity = '0.2';
-        span.title = 'Assign to a group to set anchor';
+        span.title = 'Assign this file to a group to set it as the naming anchor for that group\'s zip';
       }
     } else if (state.mode === 'zip_canon') {
       if (isLocalAnchor) {
-        span.title = 'Current anchor';
+        span.title = 'Anchor \u2014 this file\'s name is used as the zip archive name';
         span.className = 'pin-icon pin-icon-active';
       } else {
-        span.title = 'Set as anchor';
+        span.title = 'Set as anchor \u2014 use this file\'s name for the zip archive';
         span.className = 'pin-icon pin-icon-hover';
         (function(ap) {
           span.addEventListener('click', function () {
@@ -1183,6 +1767,7 @@ function buildFileTable(container, filterStr, openFileRows) {
     var td = document.createElement('td');
     var sel = document.createElement('select');
     sel.className = 'group-select';
+    sel.disabled = state.uploading;
 
     var ungrp = document.createElement('option');
     ungrp.value = '';
@@ -1201,13 +1786,53 @@ function buildFileTable(container, filterStr, openFileRows) {
 
     (function(ap) {
       sel.addEventListener('change', function() {
-        state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== ap; });
         var gid = parseInt(sel.value, 10);
+
+        // Bulk-move: target is a valid group, multiple files selected, this file is selected
+        if (!isNaN(gid) && state.selectedFiles.size > 1 && state.selectedFiles.has(ap)) {
+          var oldGroupIds = {};
+          state.selectedFiles.forEach(function(path) {
+            var fg = state.fileGroups.find(function(x) { return x.filePath === path; });
+            if (fg) { oldGroupIds[fg.groupId] = true; }
+          });
+          state.fileGroups = state.fileGroups.filter(function(fg) { return !state.selectedFiles.has(fg.filePath); });
+          state.selectedFiles.forEach(function(path) {
+            state.fileGroups.push({ filePath: path, groupId: gid });
+          });
+          if (!state.groupAnchors[gid]) { state.groupAnchors[gid] = ap; }
+          Object.keys(oldGroupIds).forEach(function(oid) { reconcileGroup(Number(oid)); });
+          state.selectedFiles.clear();
+          buildFileTable(container, filterStr, openFileRows);
+          if (_updateFileControlsFn) { _updateFileControlsFn(); }
+          return;
+        }
+
+        // Bulk-ungroup: target is "—", multiple files selected, this file is selected
+        if (isNaN(gid) && state.selectedFiles.size > 1 && state.selectedFiles.has(ap)) {
+          var ungroupOldIds = {};
+          state.selectedFiles.forEach(function(path) {
+            var fg = state.fileGroups.find(function(x) { return x.filePath === path; });
+            if (fg) { ungroupOldIds[fg.groupId] = true; }
+          });
+          state.fileGroups = state.fileGroups.filter(function(fg) { return !state.selectedFiles.has(fg.filePath); });
+          Object.keys(ungroupOldIds).forEach(function(oid) { reconcileGroup(Number(oid)); });
+          state.selectedFiles.clear();
+          buildFileTable(container, filterStr, openFileRows);
+          if (_updateFileControlsFn) { _updateFileControlsFn(); }
+          return;
+        }
+
+        // Single-file behavior (unchanged)
+        var oldFg = state.fileGroups.find(function(fg) { return fg.filePath === ap; });
+        var oldGroupId = oldFg ? oldFg.groupId : null;
+        state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== ap; });
         if (!isNaN(gid)) {
           state.fileGroups.push({ filePath: ap, groupId: gid });
           if (!state.groupAnchors[gid]) { state.groupAnchors[gid] = ap; }
         }
+        if (oldGroupId !== null) { reconcileGroup(oldGroupId); }
         buildFileTable(container, filterStr, openFileRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
       });
     }(absPath));
 
@@ -1215,121 +1840,241 @@ function buildFileTable(container, filterStr, openFileRows) {
     return { td: td, curFg: curFg };
   }
 
-  // ── Open-file rows ───────────────────────────────────────────────────────
-  openVisible.forEach(function(of) {
-    var absPath = of.filePath;
-    var tr = document.createElement('tr');
-    tr.className = 'open-file-row';
-
-    // Checkbox
-    var tdCb = document.createElement('td');
+  function buildCheckboxCell(row) {
+    var td = document.createElement('td');
     var cb = document.createElement('input');
     cb.type = 'checkbox';
-    cb.checked = state.selectedFiles.has(absPath);
+    cb.checked = state.selectedFiles.has(row.absPath);
     (function(ap) {
       cb.addEventListener('change', function() {
         if (cb.checked) { state.selectedFiles.add(ap); }
         else            { state.selectedFiles.delete(ap); }
         if (_updateFileControlsFn) { _updateFileControlsFn(); }
       });
-    }(absPath));
-    tdCb.appendChild(cb);
-    tr.appendChild(tdCb);
+    }(row.absPath));
+    td.appendChild(cb);
+    return td;
+  }
 
-    // Pin
-    tr.appendChild(buildPinCell(absPath, false));
-
-    // Switch-folder ↗
-    var tdSw = document.createElement('td');
-    tdSw.className = 'pin-cell';
+  function buildSwitchFolderCell(row) {
+    var td = document.createElement('td');
+    if (row.kind !== 'open') { return td; }
+    td.className = 'pin-cell';
     var swSpan = document.createElement('span');
-    swSpan.className = 'hover-icon';
+    swSpan.className = 'hover-icon' + (state.uploading ? ' disabled' : '');
     swSpan.textContent = '\u2197';
-    swSpan.title = 'Switch local folder to this file\u2019s folder';
+    swSpan.title = state.uploading
+      ? 'Folder switching is disabled while an upload is running'
+      : 'Switch local folder to this file\u2019s folder';
     (function(fp) {
       swSpan.addEventListener('click', function(e) {
         e.stopPropagation();
+        if (state.uploading) { return; }
         vscode.postMessage({ kind: 'switchFolder', payload: { folderPath: fp } });
       });
-    }(of.folderPath));
-    tdSw.appendChild(swSpan);
-    tr.appendChild(tdSw);
+    }(row.folderPath));
+    td.appendChild(swSpan);
+    return td;
+  }
 
-    // Filename
+  function buildFileRow(row) {
+    var tr = document.createElement('tr');
+    if (row.kind === 'open') { tr.className = 'open-file-row'; }
+    tr.dataset.filepath = row.absPath;
+
     var tdName = document.createElement('td');
-    tdName.textContent = of.fileName;
-    tr.appendChild(tdName);
+    tdName.className = 'filename-cell';
+    tdName.textContent = row.fileName;
 
-    // Group dropdown
+    var tdStatus = document.createElement('td');
+    tdStatus.className = 'file-status-cell';
+
     if (state.mode === 'zip_gun') {
-      var gr = buildGroupCell(absPath);
-      if (gr.curFg) { tr.className += ' group-color-' + ((gr.curFg.groupId - 1) % 8 + 1); }
+      var gr = buildGroupCell(row.absPath);
+      if (gr.curFg) {
+        tr.className += (tr.className ? ' ' : '') + 'group-color-' + ((gr.curFg.groupId - 1) % 8 + 1);
+        tr.dataset.groupid = String(gr.curFg.groupId);
+        var gst = state.groupUploadStatuses[gr.curFg.groupId];
+        if (gst) { renderStatusTrail(tdStatus, gst); }
+      }
+      tr.appendChild(buildCheckboxCell(row));
       tr.appendChild(gr.td);
+      tr.appendChild(buildPinCell(row.absPath, state.anchorFile === row.absPath));
+      tr.appendChild(buildSwitchFolderCell(row));
+      tr.appendChild(tdName);
+      tr.appendChild(tdStatus);
+    } else {
+      var fst = state.fileUploadStatuses[row.absPath];
+      if (fst) { renderStatusTrail(tdStatus, fst); }
+      tr.appendChild(buildCheckboxCell(row));
+      tr.appendChild(buildPinCell(row.absPath, state.anchorFile === row.absPath));
+      tr.appendChild(buildSwitchFolderCell(row));
+      tr.appendChild(tdName);
+      tr.appendChild(tdStatus);
     }
 
-    // Double-click to open in editor
     (function(ap) {
       tr.addEventListener('dblclick', function() {
         vscode.postMessage({ kind: 'openFileInEditor', payload: { filePath: ap } });
       });
-    }(absPath));
+    }(row.absPath));
 
-    tbody.appendChild(tr);
-  });
+    return tr;
+  }
 
-  // ── Local file rows ──────────────────────────────────────────────────────
-  localVisible.forEach(function (f) {
-    var anchor = isAnchorFile(f.name);
-    var absPath = folder ? folder + '/' + f.name : f.name;
-    var tr = document.createElement('tr');
+  if (state.mode === 'zip_gun') {
+    state.groups.forEach(function(group) {
+      var memberCount = state.fileGroups.filter(function(fg) { return fg.groupId === group.id; }).length;
+      var members = visibleRows.filter(function(row) {
+        return state.fileGroups.some(function(fg) {
+          return fg.groupId === group.id && fg.filePath === row.absPath;
+        });
+      });
 
-    // Checkbox
-    var tdCb = document.createElement('td');
-    var cb = document.createElement('input');
-    cb.type = 'checkbox';
-    if (anchor) {
-      cb.disabled = true;
-      cb.checked = true;
-    } else {
-      cb.checked = state.selectedFiles.has(absPath);
-      (function(ap) {
-        cb.addEventListener('change', function () {
-          if (cb.checked) { state.selectedFiles.add(ap); }
-          else            { state.selectedFiles.delete(ap); }
+      var headerTr = document.createElement('tr');
+      headerTr.className = 'group-header-row' + (state.selectedFiles.size > 0 ? ' move-target' : '');
+      headerTr.dataset.groupid = String(group.id);
+      var headerTd = document.createElement('td');
+      headerTd.setAttribute('colspan', '6');
+      headerTd.style.padding = '0';
+
+      // Inner div: flex container + background color (avoids display:flex on <td> clipping background)
+      var headerContent = document.createElement('div');
+      headerContent.className = 'group-header-content group-color-' + ((group.id - 1) % 8 + 1);
+
+      var caret = document.createElement('span');
+      caret.textContent = (state.groupCollapsed[group.id] ? '\u25b8' : '\u25be') + ' ';
+      headerContent.appendChild(caret);
+
+      // Per-group upload status icon (zipping / uploading / done / error)
+      var groupStatusIcon = document.createElement('span');
+      groupStatusIcon.className = 'group-status-icon';
+      var gstatus = state.groupUploadStatuses[group.id];
+      if (gstatus) { renderStatusTrail(groupStatusIcon, gstatus); }
+      headerContent.appendChild(groupStatusIcon);
+
+      var labelSpan = document.createElement('span');
+      labelSpan.textContent = group.label;
+      headerContent.appendChild(labelSpan);
+      headerContent.appendChild(document.createTextNode(' \u2014 '));
+
+      var zipNameSpan = document.createElement('span');
+      zipNameSpan.className = 'group-zip-name';
+      zipNameSpan.textContent = computeZipNameForGroup(group);
+      zipNameSpan.title = 'The archive filename that will be created on the server for this group';
+      headerContent.appendChild(zipNameSpan);
+
+      var countSpan = document.createElement('span');
+      countSpan.className = 'group-file-count';
+      countSpan.textContent = ' (' + memberCount + ' files)';
+      headerContent.appendChild(countSpan);
+
+      // Clear group icon (removes file assignments, keeps group)
+      var clearIcon = document.createElement('span');
+      clearIcon.className = 'group-clear-icon';
+      clearIcon.textContent = '\u2296';
+      clearIcon.title = 'Clear group (remove files, keep group)';
+      (function(gid) {
+        clearIcon.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (state.uploading) { return; }
+          state.fileGroups = state.fileGroups.filter(function(fg) { return fg.groupId !== gid; });
+          delete state.groupAnchors[gid];
+          buildFileTable(container, filterStr, openFileRows);
           if (_updateFileControlsFn) { _updateFileControlsFn(); }
         });
-      }(absPath));
-    }
-    tdCb.appendChild(cb);
-    tr.appendChild(tdCb);
+      }(group.id));
+      headerContent.appendChild(clearIcon);
 
-    // Pin
-    tr.appendChild(buildPinCell(absPath, anchor));
+      // Delete group icon (removes files AND group)
+      var deleteIcon = document.createElement('span');
+      deleteIcon.className = 'group-delete-icon';
+      deleteIcon.textContent = '\u2715';
+      deleteIcon.title = 'Delete group (files revert to ungrouped)';
+      (function(gid) {
+        deleteIcon.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (state.uploading) { return; }
+          state.fileGroups = state.fileGroups.filter(function(fg) { return fg.groupId !== gid; });
+          delete state.groupAnchors[gid];
+          delete state.groupCollapsed[gid];
+          state.groups = state.groups.filter(function(g) { return g.id !== gid; });
+          buildFileTable(container, filterStr, openFileRows);
+          if (_updateFileControlsFn) { _updateFileControlsFn(); }
+        });
+      }(group.id));
+      headerContent.appendChild(deleteIcon);
 
-    // Switch-folder: empty cell for local files (already here)
-    tr.appendChild(document.createElement('td'));
-
-    // Filename
-    var tdName = document.createElement('td');
-    tdName.textContent = f.name;
-    tr.appendChild(tdName);
-
-    // Group dropdown
-    if (state.mode === 'zip_gun') {
-      var gr = buildGroupCell(absPath);
-      if (gr.curFg) { tr.className = 'group-color-' + ((gr.curFg.groupId - 1) % 8 + 1); }
-      tr.appendChild(gr.td);
-    }
-
-    // Double-click to open in editor
-    (function(ap) {
-      tr.addEventListener('dblclick', function() {
-        vscode.postMessage({ kind: 'openFileInEditor', payload: { filePath: ap } });
+      headerTd.appendChild(headerContent);
+      headerTr.appendChild(headerTd);
+      headerTr.addEventListener('click', function() {
+        if (state.uploading) { return; }
+        if (state.selectedFiles.size > 0) {
+          var checked = Array.from(state.selectedFiles);
+          var affectedGroups = new Set();
+          checked.forEach(function(fp) {
+            var existing = state.fileGroups.find(function(fg) { return fg.filePath === fp; });
+            if (existing) { affectedGroups.add(existing.groupId); }
+            state.fileGroups = state.fileGroups.filter(function(fg) { return fg.filePath !== fp; });
+            state.fileGroups.push({ filePath: fp, groupId: group.id });
+          });
+          affectedGroups.forEach(reconcileGroup);
+          if (!state.groupAnchors[group.id]) { state.groupAnchors[group.id] = checked.slice().sort()[0]; }
+          state.selectedFiles.clear();
+          persistState();
+          buildFileTable(container, filterStr, openFileRows);
+          if (_updateFileControlsFn) { _updateFileControlsFn(); }
+          return;
+        }
+        state.groupCollapsed[group.id] = !state.groupCollapsed[group.id];
+        persistState();
+        buildFileTable(container, filterStr, openFileRows);
       });
-    }(absPath));
+      tbody.appendChild(headerTr);
 
-    tbody.appendChild(tr);
-  });
+      if (!state.groupCollapsed[group.id]) {
+        members.forEach(function(row) {
+          tbody.appendChild(buildFileRow(row));
+        });
+      }
+    });
+
+    var ungroupedFiles = visibleRows.filter(function(row) {
+      return !state.fileGroups.some(function(fg) { return fg.filePath === row.absPath; });
+    });
+    var ungroupedHeaderTr = document.createElement('tr');
+    ungroupedHeaderTr.className = 'group-header-row';
+    var ungroupedHeaderTd = document.createElement('td');
+    ungroupedHeaderTd.setAttribute('colspan', '6');
+    ungroupedHeaderTd.style.padding = '0';
+    var ungroupedContent = document.createElement('div');
+    ungroupedContent.className = 'group-header-content';
+    var ungroupedCaret = document.createElement('span');
+    ungroupedCaret.textContent = (state.ungroupedCollapsed ? '\u25b8' : '\u25be') + ' ';
+    ungroupedContent.appendChild(ungroupedCaret);
+    ungroupedContent.appendChild(document.createTextNode('Ungrouped'));
+    var ungroupedCount = document.createElement('span');
+    ungroupedCount.className = 'group-file-count';
+    ungroupedCount.textContent = ' (' + ungroupedFiles.length + ' files) \u2014 will not be uploaded';
+    ungroupedContent.appendChild(ungroupedCount);
+    ungroupedHeaderTd.appendChild(ungroupedContent);
+    ungroupedHeaderTr.appendChild(ungroupedHeaderTd);
+    ungroupedHeaderTr.addEventListener('click', function() {
+      state.ungroupedCollapsed = !state.ungroupedCollapsed;
+      buildFileTable(container, filterStr, openFileRows);
+    });
+    tbody.appendChild(ungroupedHeaderTr);
+
+    if (!state.ungroupedCollapsed) {
+      ungroupedFiles.forEach(function(row) {
+        tbody.appendChild(buildFileRow(row));
+      });
+    }
+  } else {
+    visibleRows.forEach(function(row) {
+      tbody.appendChild(buildFileRow(row));
+    });
+  }
 
   table.appendChild(tbody);
   wrap.appendChild(table);
@@ -1342,7 +2087,7 @@ function buildCollapsibleHeader(sectionKey, labelText, count) {
   var header = el('div', { className: 'section-header' });
   var arrow = collapsed ? '\u25b8' : '\u25be';
   var countStr = count !== undefined ? ' (' + count + ')' : '';
-  var headerBtn = el('button', { className: 'secondary section-toggle' }, arrow + ' ' + labelText + countStr);
+  var headerBtn = el('button', { className: 'secondary section-toggle', title: 'Click to collapse or expand' }, arrow + ' ' + labelText + countStr);
   headerBtn.addEventListener('click', function () {
     state.sectionCollapsed[sectionKey] = !state.sectionCollapsed[sectionKey];
     persistState();
@@ -1522,7 +2267,7 @@ function renderManageView(app) {
     var headerDiv = el('div', { style: 'display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;' });
     headerDiv.appendChild(el('strong', null, p.name));
     if (p.readOnly) {
-      headerDiv.appendChild(el('span', { className: 'badge-readonly' }, '\uD83D\uDD12 drop-box'));
+      headerDiv.appendChild(el('span', { className: 'badge-readonly', title: 'Stat, delete, and mkdir are disabled \u2014 used for drop-box servers that reject management commands' }, '\uD83D\uDD12 drop-box'));
     }
 
     // Connection status indicator
@@ -1536,7 +2281,7 @@ function renderManageView(app) {
     }
 
     if (state.newPresetNames[p.name]) {
-      headerDiv.appendChild(el('span', { className: 'badge-new' }, 'NEW'));
+      headerDiv.appendChild(el('span', { className: 'badge-new', title: 'This preset was added in the current session' }, 'NEW'));
     }
 
     card.appendChild(headerDiv);
@@ -1614,8 +2359,8 @@ function renderManageView(app) {
 
   // Action row
   var rowActions = el('div', { className: 'row' });
-  var addBtn = el('button', null, '+ Add Account');
-  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;' }, 'Import from FileZilla\u2026');
+  var addBtn = el('button', { title: 'Create a new SFTP connection preset' }, '+ Add Account');
+  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;', title: 'Import SFTP accounts from a FileZilla Site Manager XML export' }, 'Import from FileZilla\u2026');
   importBtn.disabled = state.importPending;
   rowActions.appendChild(addBtn);
   rowActions.appendChild(importBtn);
@@ -1957,6 +2702,10 @@ function buildPresetForm(container) {
 // ---------------------------------------------------------------------------
 
 // 'ready' causes the host to respond with presets, state, and history in one shot.
+
+// bootstrap.js — extracted from media/panel.js
+// Final ready/render bootstrap. This fragment must load after renderers.js.
+
 vscode.postMessage({ kind: 'ready' });
 
 render();

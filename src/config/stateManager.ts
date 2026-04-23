@@ -39,4 +39,8 @@ export class StateManager {
   async clearHistory(): Promise<void> {
     await this.context.globalState.update(HISTORY_KEY, []);
   }
+
+  async clearState(): Promise<void> {
+    await this.context.globalState.update(STATE_KEY, undefined);
+  }
 }

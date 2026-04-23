@@ -1,0 +1,127 @@
+/* ---------------------------------------------------------------------------
+   Per-file upload progress bar (inside filename cell)
+--------------------------------------------------------------------------- */
+
+.upload-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background-color: var(--vscode-progressBar-background);
+  transition: width 0.2s ease;
+}
+
+td.uploading-cell { position: relative; opacity: 0.85; }
+
+.group-header-row {
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
+.group-header-row td {
+  border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+}
+
+.group-header-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+
+.group-zip-name {
+  opacity: 0.7;
+  font-weight: 400;
+  font-size: 0.9em;
+}
+
+.group-file-count {
+  opacity: 0.5;
+  font-weight: 400;
+  font-size: 0.85em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.group-clear-icon {
+  margin-left: auto;
+  flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0.4;
+  font-size: 0.9em;
+}
+.group-clear-icon:hover { opacity: 1; color: var(--vscode-editorWarning-foreground); }
+
+.group-delete-icon {
+  flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0.4;
+  font-size: 0.9em;
+}
+.group-delete-icon:hover { opacity: 1; color: var(--vscode-testing-iconFailed); }
+
+.group-header-row.move-target {
+  outline: 2px dashed var(--vscode-focusBorder);
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Per-file / per-group upload status icons (status column + group headers)
+--------------------------------------------------------------------------- */
+
+.status-th {
+  width: 44px;
+  text-align: center;
+}
+
+.file-status-cell {
+  width: 44px;
+  text-align: center;
+  font-size: 0.9em;
+}
+
+.status-trail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 20px;
+}
+
+.status-icon {
+  display: inline-block;
+  min-width: 10px;
+}
+
+.status-icon-uploading,
+.status-icon-zipping {
+  animation: spin 0.8s linear infinite;
+  opacity: 0.85;
+}
+
+.status-icon-queued {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.9;
+}
+
+.status-icon-done {
+  color: var(--vscode-testing-iconPassed);
+}
+
+.status-icon-cancelled {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.status-icon-error {
+  color: var(--vscode-inputValidation-errorBorder);
+}
+
+.group-status-icon {
+  font-size: 0.9em;
+  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+}

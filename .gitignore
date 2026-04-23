@@ -5,20 +5,51 @@ dist/
 
 # Secrets & private configs
 .env
+.env.*
 filezilla-small.xml
 filezilla*.xml
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
-# Real invoice test data — private business documents
+# Real invoice test data, XSLT processors, and test output artifacts — private/local
 test-fixtures/
 
-# Claude Code / superpowers session state — machine-local, never commit
+# VS Code test runner download (vscode-test / @vscode/test-electron)
+.vscode-test/
+
+# Test coverage output
+coverage/
+*.log
+
+# Local AI / agent / machine-specific state — never commit
+.agents/
+.claude/
+.codex/
 .remember/
 .superpowers/
-.claude/settings.local.json
+AGENTS.md
+CLAUDE.md
+notes.md
+
+# Local editor/workspace config
+.vscode/
 
 # Throwaway spikes and unrelated binaries
 spikes/
 lib/
 
-# Internal planning artifacts from superpowers brainstorm tool
-docs/superpowers/
+# Internal planning/spec artifacts
+docs/
+openspec/
+
+# Local QA / smoke / Docker automation
+scripts/qa/
+docker/
+.docker/
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+docker-compose*.yaml
