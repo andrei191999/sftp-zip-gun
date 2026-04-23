@@ -2,8 +2,9 @@
   "name": "sftp-zip-gun",
   "displayName": "SFTP Zip Gun",
   "description": "Developer-first SFTP uploads for VS Code with ZIP Canon, Pistol File, ZIP Gun, remote path bookmarks, and upload history.",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "publisher": "AndreiMacovei",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/andrei191999/sftp-zip-gun"
@@ -33,12 +34,22 @@
     "onCommand:sftpZipGun.importFileZilla"
   ],
   "scripts": {
-    "compile": "esbuild src/extension.ts --bundle --platform=node --external:vscode --external:ssh2-sftp-client --outfile=dist/extension.js --sourcemap",
-    "watch": "npm run compile -- --watch",
+    "build:webview": "node ./scripts/build-webview-panel.mjs",
+    "compile": "npm run build:webview && node ./scripts/build-extension.mjs",
+    "debug:prep": "npm run test:unit && npm run typecheck && npm run compile",
+    "watch": "node ./scripts/watch.mjs",
     "package": "vsce package",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "npm run compile",
-    "test": "jest"
+    "test": "jest --runInBand",
+    "test:unit": "jest --runInBand",
+    "test:integration": "node ./scripts/qa/run-vscode-smoke.js",
+    "qa:docker:start": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Start-DockerQa.ps1",
+    "qa:docker:status": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Get-DockerQaStatus.ps1",
+    "qa:docker:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Stop-DockerQa.ps1",
+    "qa:docker:purge": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Purge-DockerQa.ps1",
+    "qa:smoke:dev": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeDev.ps1",
+    "qa:smoke:vsix": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeVsix.ps1"
   },
   "contributes": {
     "commands": [
@@ -179,7 +190,11 @@
         "sftpZipGun.defaultMode": {
           "type": "string",
           "default": "pistol_file",
-          "enum": ["zip_canon", "pistol_file", "zip_gun"],
+          "enum": [
+            "zip_canon",
+            "pistol_file",
+            "zip_gun"
+          ],
           "enumDescriptions": [
             "ZIP Canon — all files zipped into one archive",
             "Pistol File — each file uploaded separately",
@@ -197,15 +212,20 @@
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
-    "@types/jest": "^30.0.0",
+    "@types/jest": "^29.5.14",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^25.6.0",
     "@types/vscode": "^1.74.0",
     "@types/yauzl": "^2.10.3",
-    "yauzl": "^2.10.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.1",
+    "bs-logger": "^0.2.6",
     "esbuild": "^0.28.0",
-    "jest": "^30.3.0",
+    "jest": "^29.7.0",
+    "mocha": "^11.7.5",
+    "source-map": "^0.6.1",
     "ts-jest": "^29.4.9",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "yauzl": "^2.10.0"
   }
 }

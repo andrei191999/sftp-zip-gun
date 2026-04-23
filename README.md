@@ -36,59 +36,65 @@ SFTP Zip Gun keeps the whole workflow in the editor: manage connection presets, 
 - VS Code `1.74+`
 - Access to an SFTP server
 
+## Local QA Harness
+
+This repo includes a Docker-backed local QA fixture for repeatable smoke runs and manual panel testing on Windows + PowerShell.
+
+### Commands
+
+- `npm run qa:docker:start`
+- `npm run qa:docker:status`
+- `npm run qa:docker:stop`
+- `npm run qa:docker:purge`
+- `npm run qa:smoke:dev`
+- `npm run qa:smoke:vsix`
+
+### Fixture Root
+
+The harness keeps its persistent state under `%TEMP%\sftp-zip-gun-qa`.
+
+- Container name: `sftp-zip-gun-qa`
+- Host endpoint: `127.0.0.1:2222`
+- Private key: `%TEMP%\sftp-zip-gun-qa\keys\qa_ed25519`
+- Uploaded files remain in `%TEMP%\sftp-zip-gun-qa\data\...` until you explicitly run `qa:docker:purge`
+
+### Presets
+
+Password preset:
+
+- Name: `QA Password`
+- Host: `127.0.0.1`
+- Port: `2222`
+- Username: `pwuser`
+- Password: `pwpass`
+- Default remote dir: `/upload`
+
+Key preset:
+
+- Name: `QA Key`
+- Host: `127.0.0.1`
+- Port: `2222`
+- Username: `keyuser`
+- Private key: `%TEMP%\sftp-zip-gun-qa\keys\qa_ed25519`
+- Default remote dir: `/archive`
+
+Both users expose `/upload`, `/archive`, `/branch-a`, and `/branch-b`. Each remote directory is bind-mounted to a separate host folder so uploads stay inspectable even after `qa:docker:stop`.
+
+### Automated Smoke Scope
+
+`qa:smoke:dev` compiles the extension and drives the real `sftpZipGun.quickUpload` command against the live Docker fixture.
+
+`qa:smoke:vsix` packages the extension, installs the VSIX into isolated temp VS Code profile directories, then runs the same quick-upload smoke against the packaged payload.
+
+The automated suite intentionally stays narrow:
+
+- password-auth `quickUpload`
+- key-auth `quickUpload`
+- upload history assertions
+- packaged VSIX package/install smoke
+
+Full panel interaction remains manual. Use the Docker fixture to exercise add/edit/delete presets, remote browsing, bookmarks, default-path pinning, `ZIP Canon`, `Pistol File`, `ZIP Gun`, abort behavior, and history persistence.
+
 ## Getting Started
 
 1. Open any local file in VS Code.
-2. Run `SFTP Zip Gun: Open Upload Panel`.
-3. Open the `Manage` tab and add an account preset.
-4. Test the connection before uploading.
-5. Return to `Upload`, choose a local folder, select a destination path, then fire.
-
-## Upload Modes
-
-### ZIP Canon
-
-Use this when a server expects one archive per transfer. The panel builds a timestamped ZIP from the current selection and uploads that archive.
-
-### Pistol File
-
-Use this when the server should receive the original files unchanged. This mode skips archiving and uploads each selected file directly.
-
-### ZIP Gun
-
-Use this when one batch needs multiple archives. Assign files into groups, choose the naming strategy, pin per-group anchors, and upload each group archive in sequence.
-
-## Paths, Bookmarks, and Defaults
-
-Each preset has a default remote directory. That default is used automatically unless you choose a different send-to path for the current upload.
-
-You can also:
-
-- browse the remote server from the panel
-- bookmark remote paths for reuse
-- pin a browsed path as the preset's new default
-- send to a one-off path without changing the preset
-
-## Presets and Authentication
-
-Presets store non-sensitive connection metadata in VS Code settings under `sftpZipGun.presets`.
-
-- Passwords are stored in the OS keychain through VS Code `SecretStorage`.
-- SSH key passphrases are also stored in `SecretStorage`.
-- Sensitive values are never written back to `settings.json` or sent to the webview.
-
-## FileZilla Import
-
-Use `Import from FileZilla…` in the Manage tab to bring over SFTP sites from a FileZilla Site Manager XML export.
-
-## Commands
-
-| Command | Title | Shortcut |
-| --- | --- | --- |
-| `sftpZipGun.openPanel` | SFTP Zip Gun: Open Upload Panel | `Ctrl+Shift+U` / `Cmd+Shift+U` |
-| `sftpZipGun.quickUpload` | SFTP Zip Gun: Quick Upload | Context menus |
-| `sftpZipGun.importFileZilla` | SFTP Zip Gun: Import Presets from FileZilla… | None |
-
-The main panel command is available from the editor title bar plus Explorer and editor context menus for local files.
-
-Quick Upload appears in context menus once at least one preset is saved.
