@@ -1,6 +1,13 @@
 type MockStore = Map<string, unknown>;
 
 const configurationStore = new Map<string, MockStore>();
+const registeredCommands: string[] = [];
+
+function makeDisposable(fn?: () => void) {
+  return {
+    dispose: fn ?? (() => {}),
+  };
+}
 
 function getSectionStore(section: string): MockStore {
   const key = section || '';
@@ -27,6 +34,7 @@ export const workspace = {
       return Promise.resolve();
     },
   }),
+  onDidChangeConfiguration: jest.fn(() => makeDisposable()),
 };
 
 export function resetMockWorkspace(): void {
@@ -43,6 +51,48 @@ export function setMockConfiguration(section: string, values: Record<string, unk
 
 export function getMockConfiguration(section: string): Record<string, unknown> {
   return Object.fromEntries(getSectionStore(section));
+}
+
+const outputChannel = {
+  appendLine: jest.fn(),
+  dispose: jest.fn(),
+};
+
+export const window = {
+  createOutputChannel: jest.fn(() => outputChannel),
+  showInformationMessage: jest.fn(),
+  showWarningMessage: jest.fn(),
+  showErrorMessage: jest.fn(),
+  activeTextEditor: undefined,
+};
+
+export const commands = {
+  registerCommand: jest.fn((command: string) => {
+    registeredCommands.push(command);
+    return makeDisposable();
+  }),
+  executeCommand: jest.fn(() => Promise.resolve(undefined)),
+};
+
+export function resetMockWindow(): void {
+  outputChannel.appendLine.mockReset();
+  outputChannel.dispose.mockReset();
+  window.createOutputChannel.mockClear();
+  window.showInformationMessage.mockClear();
+  window.showWarningMessage.mockClear();
+  window.showErrorMessage.mockClear();
+  window.activeTextEditor = undefined;
+}
+
+export function resetRegisteredCommands(): void {
+  registeredCommands.length = 0;
+  commands.registerCommand.mockClear();
+  commands.executeCommand.mockClear();
+  workspace.onDidChangeConfiguration.mockClear();
+}
+
+export function getRegisteredCommands(): string[] {
+  return [...registeredCommands];
 }
 
 export function makeMockContext(options?: {

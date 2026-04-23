@@ -152,6 +152,54 @@ describe('parseFileZillaXml — duplicates and existingPresets', () => {
     expect(result.duplicates).toBe(1);
   });
 
+  it('does not treat different ports as duplicates against existingPresets', () => {
+    const xml = wrapInFileZilla(makeServer({ host: 'sftp.example.com', user: 'testuser', port: 2222 }));
+    const existing = [
+      {
+        name: 'Existing',
+        host: 'sftp.example.com',
+        port: 22,
+        username: 'testuser',
+        remoteDir: '/',
+        savedPaths: [],
+        authType: 'password' as const,
+        keyPath: '',
+        readOnly: false,
+      },
+    ];
+
+    const result = parseFileZillaXml(xml, existing);
+
+    expect(result.presets).toHaveLength(1);
+    expect(result.duplicates).toBe(0);
+  });
+
+  it('keeps same host and user when port differs', () => {
+    const xml = wrapInFileZilla(
+      makeServer({ name: 'Port 22', host: 'sftp.example.com', user: 'testuser', port: 22 }) +
+      makeServer({ name: 'Port 2222', host: 'sftp.example.com', user: 'testuser', port: 2222 })
+    );
+
+    const result = parseFileZillaXml(xml);
+
+    expect(result.presets).toHaveLength(2);
+    expect(result.duplicates).toBe(0);
+    expect(result.skipped).toBe(0);
+  });
+
+  it('keeps same host and user when remoteDir differs', () => {
+    const xml = wrapInFileZilla(
+      makeServer({ name: 'Root Dir', host: 'sftp.example.com', user: 'testuser', remoteDir: '/' }) +
+      makeServer({ name: 'Uploads Dir', host: 'sftp.example.com', user: 'testuser', remoteDir: '/uploads' })
+    );
+
+    const result = parseFileZillaXml(xml);
+
+    expect(result.presets).toHaveLength(2);
+    expect(result.duplicates).toBe(0);
+    expect(result.skipped).toBe(0);
+  });
+
   it('skips duplicate server names from the same import batch', () => {
     const xml = wrapInFileZilla(
       makeServer({ name: 'Same Name', host: 'alpha.example.com', user: 'alpha' }) +
@@ -169,6 +217,48 @@ describe('parseFileZillaXml — duplicates and existingPresets', () => {
     expect(result.presets).toHaveLength(0);
     expect(result.skipped).toBe(0);
     expect(result.duplicates).toBe(0);
+  });
+
+  it('counts unnamed SFTP servers as skipped entries', () => {
+    const xml = wrapInFileZilla(
+      makeServer({ name: '', host: 'unnamed.example.com', user: 'anon' }) +
+      makeServer({ name: 'Valid Site', host: 'valid.example.com', user: 'valid' })
+    );
+
+    const result = parseFileZillaXml(xml);
+
+    expect(result.presets).toHaveLength(1);
+    expect(result.presets[0].name).toBe('Valid Site');
+    expect(result.skipped).toBe(1);
+    expect(result.duplicates).toBe(0);
+  });
+
+  it('counts unnamed SFTP servers in the total processed batch', () => {
+    const xml = wrapInFileZilla(
+      makeServer({ name: '', host: 'unnamed.example.com', user: 'anon' }) +
+      makeServer({ name: 'Duplicate Existing', host: 'dup.example.com', user: 'dup' }) +
+      makeServer({ name: 'Imported Site', host: 'import.example.com', user: 'import' })
+    );
+    const existing = [
+      {
+        name: 'Existing',
+        host: 'dup.example.com',
+        port: 22,
+        username: 'dup',
+        remoteDir: '/',
+        savedPaths: [],
+        authType: 'password' as const,
+        keyPath: '',
+        readOnly: false,
+      },
+    ];
+
+    const result = parseFileZillaXml(xml, existing);
+
+    expect(result.presets).toHaveLength(1);
+    expect(result.skipped).toBe(1);
+    expect(result.duplicates).toBe(1);
+    expect(result.presets.length + result.skipped + result.duplicates).toBe(3);
   });
 });
 

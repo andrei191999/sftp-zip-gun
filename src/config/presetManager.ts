@@ -151,4 +151,16 @@ export class PresetManager {
     await this.context.secrets.delete(secretKey(name, 'password'));
     await this.context.secrets.delete(secretKey(name, 'passphrase'));
   }
+
+  async clearAll(): Promise<void> {
+    const existing = this.getAll();
+    await vscode.workspace
+      .getConfiguration(CONFIG_SECTION)
+      .update(CONFIG_KEY, [], vscode.ConfigurationTarget.Global);
+
+    for (const preset of existing) {
+      await this.context.secrets.delete(secretKey(preset.name, 'password'));
+      await this.context.secrets.delete(secretKey(preset.name, 'passphrase'));
+    }
+  }
 }
