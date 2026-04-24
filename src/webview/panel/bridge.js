@@ -29,25 +29,25 @@ window.addEventListener('message', function (event) {
       state.uploadProgressText = (p.currentFile ? p.currentFile + ' \u2014 ' : '') + p.percent + '%';
       var fp = p.currentFilePath || null;
       var matchedRows = [];
-      var rows = document.querySelectorAll('#file-list tr');
-      rows.forEach(function(row) {
-        var rowFilePath = row.dataset.filepath;
-        var match = rowFilePath && (fp
-          ? rowFilePath === fp
-          : getFileName(rowFilePath) === p.currentFile);
-        if (match) {
-          matchedRows.push(row);
-          applyProgressBar(row.querySelector('td.filename-cell'), p.percent);
+      if (fp) {
+        var cachedRow = state.fileRowMap.get(fp);
+        if (cachedRow) {
+          matchedRows.push(cachedRow);
+          applyProgressBar(cachedRow.querySelector('td.filename-cell'), p.percent);
         }
-      });
+      } else {
+        state.fileRowMap.forEach(function(row, rowFilePath) {
+          if (getFileName(rowFilePath) === p.currentFile) {
+            matchedRows.push(row);
+            applyProgressBar(row.querySelector('td.filename-cell'), p.percent);
+          }
+        });
+      }
       if (matchedRows.length === 0) {
         Object.keys(state.fileUploadStatuses).forEach(function(filePath) {
           var trail = state.fileUploadStatuses[filePath];
-          var row = null;
           if (!trail || !trail.zipped || trail.upload !== 'uploading') { return; }
-          row = Array.from(rows).find(function(candidate) {
-            return candidate.dataset.filepath === filePath;
-          }) || null;
+          var row = state.fileRowMap.get(filePath);
           if (!row) { return; }
           applyProgressBar(row.querySelector('td.filename-cell'), p.percent);
         });

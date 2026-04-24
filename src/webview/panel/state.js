@@ -52,6 +52,7 @@ let state = {
   pendingDeleteName: null,  // string | null — preset name awaiting inline delete confirmation
   uploadProgressText: null, // string | null — live upload progress shown in log box footer
   fileUploadStatuses: {},   // { [absPath]: StatusTrail } — pistol_file and zip_canon source rows
+  fileRowMap: new Map(),    // { filePath -> HTMLTableRowElement } — rebuilt by buildFileTable
   groupUploadStatuses: {},  // { [groupId]: StatusTrail } — zip_gun group headers and member rows
   modeFileStatuses:  {},   // { [mode]: fileUploadStatuses snapshot } — saved on mode switch
   modeGroupStatuses: {},   // { [mode]: groupUploadStatuses snapshot } — saved on mode switch

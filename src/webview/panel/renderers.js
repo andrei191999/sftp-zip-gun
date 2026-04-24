@@ -1330,6 +1330,12 @@ function buildFileTable(container, filterStr, openFileRows) {
   wrap.appendChild(table);
   container.appendChild(wrap);
   wrap.scrollTop = _prevScroll;
+
+  // Rebuild row cache for uploadProgress handler
+  state.fileRowMap = new Map();
+  tbody.querySelectorAll('tr[data-filepath]').forEach(function(row) {
+    if (row.dataset.filepath) { state.fileRowMap.set(row.dataset.filepath, row); }
+  });
 }
 
 function buildCollapsibleHeader(sectionKey, labelText, count) {
