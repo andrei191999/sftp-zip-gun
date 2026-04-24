@@ -172,6 +172,8 @@ export class PanelUploadSession {
           let pistolDoneCount = 0;
           const pistolTotal = payload.mode === 'pistol_file' ? prepared.localPaths.length : 0;
           const pistolWindow: string[] = [];
+          let lastProgressMs = 0;
+          let zipCanonUploadingPosted = false;
           this.uploading = true;
           const result = await runUploadRunner({
             preset,
@@ -185,7 +187,10 @@ export class PanelUploadSession {
             createId: generateId,
             onProgress: (uploadProgress) => {
               if (payload.mode === 'zip_canon') {
-                this.setFileStatuses(zipCanonSourceFiles, 'uploading');
+                if (!zipCanonUploadingPosted) {
+                  this.setFileStatuses(zipCanonSourceFiles, 'uploading');
+                  zipCanonUploadingPosted = true;
+                }
               } else if (payload.mode === 'pistol_file') {
                 this.inFlightFilePath = uploadProgress.currentFilePath;
                 if (uploadProgress.currentFilePath) {
@@ -200,17 +205,21 @@ export class PanelUploadSession {
               }
 
               this.currentRemotePath = uploadProgress.remotePath;
-              progress.report({ increment: 0, message: `${path.basename(uploadProgress.currentFilePath ?? uploadProgress.currentFile ?? '')} — ${uploadProgress.percent}%` });
-              this.post({
-                kind: 'uploadProgress',
-                payload: {
-                  bytesTransferred: uploadProgress.bytesTransferred,
-                  totalBytes: uploadProgress.totalBytes,
-                  percent: uploadProgress.percent,
-                  currentFile: uploadProgress.currentFile,
-                  currentFilePath: uploadProgress.currentFilePath,
-                },
-              });
+              const now = Date.now();
+              if (now - lastProgressMs >= 80) {
+                lastProgressMs = now;
+                progress.report({ increment: 0, message: `${path.basename(uploadProgress.currentFilePath ?? uploadProgress.currentFile ?? '')} — ${uploadProgress.percent}%` });
+                this.post({
+                  kind: 'uploadProgress',
+                  payload: {
+                    bytesTransferred: uploadProgress.bytesTransferred,
+                    totalBytes: uploadProgress.totalBytes,
+                    percent: uploadProgress.percent,
+                    currentFile: uploadProgress.currentFile,
+                    currentFilePath: uploadProgress.currentFilePath,
+                  },
+                });
+              }
             },
             onFileUploaded: (localPath, _remotePath) => {
               if (payload.mode === 'pistol_file' && pistolTotal > 1) {
@@ -297,7 +306,7 @@ export class PanelUploadSession {
       this.pendingGroupIds.delete(group.id);
       this.post({ kind: 'fileStatus', payload: { groupId: group.id, status: 'done' } });
     }
-    this.post({ kind: 'log', payload: { level: 'info', text: `Connected to ${preset.host}:${preset.port}`, category: 'sys' } });
+    this.post({ kind: 'log', payload: { level: 'info', text: `Uploaded to ${preset.host}:${preset.port}`, category: 'sys' } });
   }
 
   private markArtifactsFailed(
