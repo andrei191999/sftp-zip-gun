@@ -27,7 +27,7 @@ let state = {
   folderPath: null,
   uploading: false,
   openFiles: [],            // [{path, name}] from VS Code open tabs
-  sectionCollapsed: { local: false },
+  sectionCollapsed: { local: false, openFiles: false, localFiles: false },
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
   newPresetNames: {},          // session-only: { [name]: true } for names added this session (cleared on edit)
   logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
@@ -90,6 +90,7 @@ function pushLog(text, level, category) {
   var lvl = level || 'info';
   state.logs.push({ level: lvl, text: text, ts: nowHHMMSS(), category: category || '' });
   if (state.logs.length > LOG_CAP) { state.logs.shift(); }
+  if (!state.logActiveTab) { state.logActiveTab = 'log'; }
 }
 
 var _lastSavedMode = null;
@@ -1186,19 +1187,22 @@ function renderUploadView(app) {
 
   // ---- File sections (Open files merged with Local folder, shared search) ----
   var localFolderNorm = normalizeFolderPath(state.folderPath);
-  // Open files not already in the local folder
-  var openFileRows = state.openFiles
-    .filter(function(of) {
-      var ofFolderNorm = (of.path || '').replace(/\\/g, '/').replace(/\/[^/]+$/, '');
-      return ofFolderNorm !== localFolderNorm;
-    })
-    .map(function(of) {
-      var ofFolder = of.path.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
-      return { filePath: of.path, fileName: of.name, folderPath: ofFolder };
-    });
+  // All open VS Code tabs, paths normalized to forward slashes for consistent comparison
+  var openFileRows = state.openFiles.map(function(of) {
+    var filePath = (of.path || '').replace(/\\/g, '/');
+    var ofFolder = filePath.replace(/\/[^/]+$/, '');
+    return { filePath: filePath, fileName: of.name, folderPath: ofFolder };
+  });
+  // Set of normalized open paths — used for dedup with local files
+  var openNormPaths = new Set(openFileRows.map(function(of) { return of.filePath; }));
 
   var localFileCount = state.files.filter(function(f){ return !f.isDirectory; }).length;
-  var totalFileCount = localFileCount + openFileRows.length;
+  var localOnlyCount = state.files.filter(function(f) {
+    if (f.isDirectory) { return false; }
+    var absPath = localFolderNorm ? localFolderNorm + '/' + f.name : f.name;
+    return !openNormPaths.has(absPath);
+  }).length;
+  var totalFileCount = localOnlyCount + openFileRows.length;
   var localLabel = 'Files' + (state.folderPath ? ' \u2014 ' + getFileName(state.folderPath) : '');
   var sectionFiles = el('div', { id: 'section-files' });
   sectionFiles.appendChild(buildCollapsibleHeader('local', localLabel, totalFileCount));
@@ -1243,16 +1247,42 @@ function renderUploadView(app) {
   function updateFileControls() {
     if (!toggleSelectBtn || !counterSpan) { return; }
     var folder = normalizeFolderPath(state.folderPath);
-    var selectableCount = state.files.filter(function (f) {
-      return !f.isDirectory;
-    }).length + openFileRows.length;
-    var selectedCount = state.files.filter(function (f) {
-      if (f.isDirectory) { return false; }
-      var absPath = folder ? folder + '/' + f.name : f.name;
-      return state.selectedFiles.has(absPath);
-    }).length + openFileRows.filter(function(of) {
-      return state.selectedFiles.has(of.filePath);
-    }).length;
+    var openCollapsed = !!state.sectionCollapsed.openFiles;
+    var localFilesCollapsedCtrl = !!state.sectionCollapsed.localFiles;
+    var selectableCount, selectedCount;
+    if (openCollapsed && localFilesCollapsedCtrl) {
+      selectableCount = 0;
+      selectedCount = 0;
+    } else if (openCollapsed) {
+      // Open hidden, local visible: all local files (including those also open)
+      selectableCount = state.files.filter(function(f) { return !f.isDirectory; }).length;
+      selectedCount = state.files.filter(function(f) {
+        if (f.isDirectory) { return false; }
+        var absPath = folder ? folder + '/' + f.name : f.name;
+        return state.selectedFiles.has(absPath);
+      }).length;
+    } else if (localFilesCollapsedCtrl) {
+      // Local hidden, open visible: only open files
+      selectableCount = openFileRows.length;
+      selectedCount = openFileRows.filter(function(of) {
+        return state.selectedFiles.has(of.filePath);
+      }).length;
+    } else {
+      // Both visible: local-only files + open files (no double-count)
+      selectableCount = state.files.filter(function(f) {
+        if (f.isDirectory) { return false; }
+        var absPath = folder ? folder + '/' + f.name : f.name;
+        return !openNormPaths.has(absPath);
+      }).length + openFileRows.length;
+      selectedCount = state.files.filter(function(f) {
+        if (f.isDirectory) { return false; }
+        var absPath = folder ? folder + '/' + f.name : f.name;
+        if (openNormPaths.has(absPath)) { return false; }
+        return state.selectedFiles.has(absPath);
+      }).length + openFileRows.filter(function(of) {
+        return state.selectedFiles.has(of.filePath);
+      }).length;
+    }
     var label;
     var toggleTitle;
     if (selectedCount === 0) {
@@ -1452,43 +1482,48 @@ function renderUploadView(app) {
   if (!state.sectionCollapsed.local && fileListContainer) {
     toggleSelectBtn.addEventListener('click', function () {
       var folder = normalizeFolderPath(state.folderPath);
-      var selectableFiles = state.files.filter(function (f) { return !f.isDirectory; });
+      var openCollapsed = !!state.sectionCollapsed.openFiles;
+      var localFilesCollapsedSel = !!state.sectionCollapsed.localFiles;
+      var allFiles = state.files.filter(function (f) { return !f.isDirectory; });
       var isGrouped = function(ap) {
         return state.mode === 'zip_gun' && state.fileGroups.some(function(fg) { return fg.filePath === ap; });
       };
-      // In zip_gun, "all selected" means all UNGROUPED files are selected
-      var allLocalSelected = selectableFiles.every(function (f) {
+      // Determine which files are visible in each section based on collapse state
+      var visibleLocalFiles = localFilesCollapsedSel ? [] : (openCollapsed ? allFiles : allFiles.filter(function(f) {
         var absPath = folder ? folder + '/' + f.name : f.name;
-        if (isGrouped(absPath)) { return true; } // grouped files don't count
+        return !openNormPaths.has(absPath);
+      }));
+      var visibleOpenRows = openCollapsed ? [] : openFileRows;
+      var allLocalSelected = visibleLocalFiles.every(function (f) {
+        var absPath = folder ? folder + '/' + f.name : f.name;
+        if (isGrouped(absPath)) { return true; }
         return state.selectedFiles.has(absPath);
       });
-      var allOpenSelected = openFileRows.every(function (of) {
+      var allOpenSelected = visibleOpenRows.every(function (of) {
         if (isGrouped(of.filePath)) { return true; }
         return state.selectedFiles.has(of.filePath);
       });
       var ungroupedLocalCount = state.mode === 'zip_gun'
-        ? selectableFiles.filter(function(f) { return !isGrouped(folder ? folder + '/' + f.name : f.name); }).length
-        : selectableFiles.length;
+        ? visibleLocalFiles.filter(function(f) { return !isGrouped(folder ? folder + '/' + f.name : f.name); }).length
+        : visibleLocalFiles.length;
       var ungroupedOpenCount = state.mode === 'zip_gun'
-        ? openFileRows.filter(function(of) { return !isGrouped(of.filePath); }).length
-        : openFileRows.length;
+        ? visibleOpenRows.filter(function(of) { return !isGrouped(of.filePath); }).length
+        : visibleOpenRows.length;
       var allSelected = allLocalSelected && allOpenSelected
                      && (ungroupedLocalCount + ungroupedOpenCount > 0);
       if (allSelected) {
-        // Deselect all (clear selection regardless of group status)
-        selectableFiles.forEach(function (f) {
+        visibleLocalFiles.forEach(function (f) {
           var absPath = folder ? folder + '/' + f.name : f.name;
           state.selectedFiles.delete(absPath);
         });
-        openFileRows.forEach(function (of) { state.selectedFiles.delete(of.filePath); });
+        visibleOpenRows.forEach(function (of) { state.selectedFiles.delete(of.filePath); });
       } else {
-        // Select only ungrouped files in zip_gun, all files otherwise
-        selectableFiles.forEach(function (f) {
+        visibleLocalFiles.forEach(function (f) {
           var absPath = folder ? folder + '/' + f.name : f.name;
           if (isGrouped(absPath)) { return; }
           state.selectedFiles.add(absPath);
         });
-        openFileRows.forEach(function (of) {
+        visibleOpenRows.forEach(function (of) {
           if (isGrouped(of.filePath)) { return; }
           state.selectedFiles.add(of.filePath);
         });
@@ -1641,7 +1676,7 @@ function reconcileGroup(groupId) {
   }
 }
 
-// openFileRows: optional array of {filePath, fileName, folderPath} — open VS Code tabs not in local folder.
+// openFileRows: optional array of {filePath, fileName, folderPath} — all open VS Code tabs.
 function buildFileTable(container, filterStr, openFileRows) {
   _fileTableContainer = container;
   _fileTableFilterStr = filterStr || '';
@@ -1651,17 +1686,26 @@ function buildFileTable(container, filterStr, openFileRows) {
   clearEl(container);
   var filter = (filterStr || '').toLowerCase();
   var folder = normalizeFolderPath(state.folderPath);
+  var openCollapsed = !!state.sectionCollapsed.openFiles;
+  var openNormPathSet = new Set((openFileRows || []).map(function(of) { return of.filePath; }));
 
   var localVisible = state.files.filter(function (f) {
     if (f.isDirectory) { return false; }
     if (filter && !f.name.toLowerCase().includes(filter)) { return false; }
+    // When open section is expanded, hide local files that are already shown as open
+    if (!openCollapsed) {
+      var absPath = folder ? folder + '/' + f.name : f.name;
+      if (openNormPathSet.has(absPath)) { return false; }
+    }
     return true;
-  });
+  }).sort(function(a, b) { return a.name.localeCompare(b.name); });
+
   var openVisible = (openFileRows || []).filter(function(of) {
     return !filter || of.fileName.toLowerCase().includes(filter);
-  });
+  }).sort(function(a, b) { return a.fileName.localeCompare(b.fileName); });
 
-  if (localVisible.length === 0 && openVisible.length === 0 && (state.mode !== 'zip_gun' || state.groups.length === 0)) { return; }
+  var hasOpenFileRows = (openFileRows || []).length > 0;
+  if (localVisible.length === 0 && openVisible.length === 0 && !hasOpenFileRows && (state.mode !== 'zip_gun' || state.groups.length === 0)) { return; }
 
   var visibleRows = [];
   openVisible.forEach(function(of) {
@@ -1694,14 +1738,16 @@ function buildFileTable(container, filterStr, openFileRows) {
     hrow.appendChild(el('th', null, 'Group'));
     hrow.appendChild(el('th', null, ''));
     hrow.appendChild(el('th', null, ''));
-    hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
+    var tableFileCount = openCollapsed ? localVisible.length : (localVisible.length + openVisible.length);
+    hrow.appendChild(el('th', null, 'File (' + tableFileCount + ')'));
     hrow.appendChild(el('th', { className: 'status-th' }, ''));
   } else {
     var pinThAttrs2 = state.mode === 'zip_canon' ? { title: 'Anchor \u2014 determines the zip archive filename' } : null;
     hrow.appendChild(el('th', pinThAttrs2, ''));
     hrow.appendChild(el('th', null, ''));
     hrow.appendChild(el('th', null, ''));
-    hrow.appendChild(el('th', null, 'File (' + (localVisible.length + openVisible.length) + ')'));
+    var tableFileCount = openCollapsed ? localVisible.length : (localVisible.length + openVisible.length);
+    hrow.appendChild(el('th', null, 'File (' + tableFileCount + ')'));
     hrow.appendChild(el('th', { className: 'status-th' }, ''));
   }
   thead.appendChild(hrow);
@@ -1885,6 +1931,7 @@ function buildFileTable(container, filterStr, openFileRows) {
   function buildSwitchFolderCell(row) {
     var td = document.createElement('td');
     if (row.kind !== 'open') { return td; }
+    if (row.folderPath === folder) { return td; }  // already in local folder — no switch needed
     td.className = 'pin-cell';
     var swSpan = document.createElement('span');
     swSpan.className = 'hover-icon' + (state.uploading ? ' disabled' : '');
@@ -1947,6 +1994,33 @@ function buildFileTable(container, filterStr, openFileRows) {
 
     return tr;
   }
+
+  // ── Recent Files separator (collapsible open-tabs section) ─────────────────
+  if (hasOpenFileRows) {
+    var nCols = state.mode === 'zip_gun' ? 6 : 5;
+    var sepRow = document.createElement('tr');
+    sepRow.className = 'open-section-separator';
+    var sepTd = document.createElement('td');
+    sepTd.setAttribute('colspan', String(nCols));
+    var sepArrow = openCollapsed ? '\u25b8' : '\u25be';
+    var sepBtn = el('button', {
+      className: 'secondary section-toggle',
+      title: openCollapsed ? 'Show open editor files' : 'Hide open editor files',
+    }, sepArrow + ' Open Files (' + (openFileRows || []).length + ')');
+    (function(c, fStr, ofRows) {
+      sepBtn.addEventListener('click', function() {
+        state.sectionCollapsed.openFiles = !state.sectionCollapsed.openFiles;
+        persistState();
+        buildFileTable(c, fStr, ofRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+      });
+    }(container, filterStr, openFileRows));
+    sepTd.appendChild(sepBtn);
+    sepRow.appendChild(sepTd);
+    if (state.mode !== 'zip_gun') { tbody.appendChild(sepRow); }
+  }
+
+  var localFilesCollapsed = !!state.sectionCollapsed.localFiles;
 
   if (state.mode === 'zip_gun') {
     state.groups.forEach(function(group) {
@@ -2065,41 +2139,112 @@ function buildFileTable(container, filterStr, openFileRows) {
       }
     });
 
-    var ungroupedFiles = visibleRows.filter(function(row) {
-      return !state.fileGroups.some(function(fg) { return fg.filePath === row.absPath; });
-    });
-    var ungroupedHeaderTr = document.createElement('tr');
-    ungroupedHeaderTr.className = 'group-header-row';
-    var ungroupedHeaderTd = document.createElement('td');
-    ungroupedHeaderTd.setAttribute('colspan', '6');
-    ungroupedHeaderTd.style.padding = '0';
-    var ungroupedContent = document.createElement('div');
-    ungroupedContent.className = 'group-header-content';
-    var ungroupedCaret = document.createElement('span');
-    ungroupedCaret.textContent = (state.ungroupedCollapsed ? '\u25b8' : '\u25be') + ' ';
-    ungroupedContent.appendChild(ungroupedCaret);
-    ungroupedContent.appendChild(document.createTextNode('Ungrouped'));
-    var ungroupedCount = document.createElement('span');
-    ungroupedCount.className = 'group-file-count';
-    ungroupedCount.textContent = ' (' + ungroupedFiles.length + ' files) \u2014 will not be uploaded';
-    ungroupedContent.appendChild(ungroupedCount);
-    ungroupedHeaderTd.appendChild(ungroupedContent);
-    ungroupedHeaderTr.appendChild(ungroupedHeaderTd);
-    ungroupedHeaderTr.addEventListener('click', function() {
-      state.ungroupedCollapsed = !state.ungroupedCollapsed;
-      buildFileTable(container, filterStr, openFileRows);
-    });
-    tbody.appendChild(ungroupedHeaderTr);
+    // ── Open Files section (below groups in zip_gun) ────────────────────────
+    if (hasOpenFileRows) {
+      var openUnassigned = openVisible.filter(function(of) {
+        return !state.fileGroups.some(function(fg) { return fg.filePath === of.filePath; });
+      });
+      var zgSepRow = document.createElement('tr');
+      zgSepRow.className = 'open-section-separator';
+      var zgSepTd = document.createElement('td');
+      zgSepTd.setAttribute('colspan', '6');
+      var zgArrow = openCollapsed ? '\u25b8' : '\u25be';
+      var zgBtn = el('button', {
+        className: 'secondary section-toggle',
+        title: openCollapsed ? 'Show open editor files' : 'Hide open editor files',
+      }, zgArrow + ' Open Files (' + openUnassigned.length + ')');
+      (function(c, fStr, ofRows) {
+        zgBtn.addEventListener('click', function() {
+          state.sectionCollapsed.openFiles = !state.sectionCollapsed.openFiles;
+          persistState();
+          buildFileTable(c, fStr, ofRows);
+          if (_updateFileControlsFn) { _updateFileControlsFn(); }
+        });
+      }(container, filterStr, openFileRows));
+      zgSepTd.appendChild(zgBtn);
+      zgSepRow.appendChild(zgSepTd);
+      tbody.appendChild(zgSepRow);
+      if (!openCollapsed) {
+        openUnassigned.forEach(function(of) {
+          tbody.appendChild(buildFileRow({
+            kind: 'open',
+            absPath: of.filePath,
+            fileName: of.fileName,
+            folderPath: of.folderPath,
+            isAnchor: false,
+          }));
+        });
+      }
+    }
 
-    if (!state.ungroupedCollapsed) {
-      ungroupedFiles.forEach(function(row) {
-        tbody.appendChild(buildFileRow(row));
+    // ── Local Files section (unassigned local files only) ────────────────────
+    var lfUnassigned = localVisible.filter(function(f) {
+      var absPath = folder ? folder + '/' + f.name : f.name;
+      return !state.fileGroups.some(function(fg) { return fg.filePath === absPath; });
+    });
+    var lfSepRowZG = document.createElement('tr');
+    lfSepRowZG.className = 'open-section-separator';
+    var lfSepTdZG = document.createElement('td');
+    lfSepTdZG.setAttribute('colspan', '6');
+    var lfArrowZG = localFilesCollapsed ? '\u25b8' : '\u25be';
+    var lfBtnZG = el('button', {
+      className: 'secondary section-toggle',
+      title: localFilesCollapsed ? 'Show local files' : 'Hide local files',
+    }, lfArrowZG + ' Local Files (' + lfUnassigned.length + ')');
+    (function(c, fStr, ofRows) {
+      lfBtnZG.addEventListener('click', function() {
+        state.sectionCollapsed.localFiles = !state.sectionCollapsed.localFiles;
+        persistState();
+        buildFileTable(c, fStr, ofRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+      });
+    }(container, filterStr, openFileRows));
+    lfSepTdZG.appendChild(lfBtnZG);
+    lfSepRowZG.appendChild(lfSepTdZG);
+    tbody.appendChild(lfSepRowZG);
+    if (!localFilesCollapsed) {
+      lfUnassigned.forEach(function(f) {
+        tbody.appendChild(buildFileRow({
+          kind: 'local',
+          absPath: folder ? folder + '/' + f.name : f.name,
+          fileName: f.name,
+          folderPath: folder,
+          isAnchor: isAnchorFile(f.name),
+        }));
       });
     }
   } else {
-    visibleRows.forEach(function(row) {
-      tbody.appendChild(buildFileRow(row));
-    });
+    // non-zip_gun: open rows first (gated on collapse), then "Local Files" section header, then local rows
+    if (!openCollapsed) {
+      visibleRows.filter(function(row) { return row.kind === 'open'; }).forEach(function(row) {
+        tbody.appendChild(buildFileRow(row));
+      });
+    }
+    var lfSepRow = document.createElement('tr');
+    lfSepRow.className = 'open-section-separator';
+    var lfSepTd = document.createElement('td');
+    lfSepTd.setAttribute('colspan', '5');
+    var lfArrow = localFilesCollapsed ? '\u25b8' : '\u25be';
+    var lfBtn = el('button', {
+      className: 'secondary section-toggle',
+      title: localFilesCollapsed ? 'Show local files' : 'Hide local files',
+    }, lfArrow + ' Local Files (' + localVisible.length + ')');
+    (function(c, fStr, ofRows) {
+      lfBtn.addEventListener('click', function() {
+        state.sectionCollapsed.localFiles = !state.sectionCollapsed.localFiles;
+        persistState();
+        buildFileTable(c, fStr, ofRows);
+        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+      });
+    }(container, filterStr, openFileRows));
+    lfSepTd.appendChild(lfBtn);
+    lfSepRow.appendChild(lfSepTd);
+    tbody.appendChild(lfSepRow);
+    if (!localFilesCollapsed) {
+      visibleRows.filter(function(row) { return row.kind === 'local'; }).forEach(function(row) {
+        tbody.appendChild(buildFileRow(row));
+      });
+    }
   }
 
   table.appendChild(tbody);

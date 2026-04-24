@@ -27,7 +27,7 @@ let state = {
   folderPath: null,
   uploading: false,
   openFiles: [],            // [{path, name}] from VS Code open tabs
-  sectionCollapsed: { local: false },
+  sectionCollapsed: { local: false, openFiles: false, localFiles: false },
   logs: [],                 // { level: string, text: string, ts: string, category: string }[]
   newPresetNames: {},          // session-only: { [name]: true } for names added this session (cleared on edit)
   logFilter: new Set(['upload', 'conn', 'import', 'accounts', 'sys']),  // session-only
@@ -90,6 +90,7 @@ function pushLog(text, level, category) {
   var lvl = level || 'info';
   state.logs.push({ level: lvl, text: text, ts: nowHHMMSS(), category: category || '' });
   if (state.logs.length > LOG_CAP) { state.logs.shift(); }
+  if (!state.logActiveTab) { state.logActiveTab = 'log'; }
 }
 
 var _lastSavedMode = null;
