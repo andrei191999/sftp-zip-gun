@@ -51,6 +51,7 @@ export class PanelUploadSession {
   cancel(): void {
     if (this.zipping) {
       this.post({ kind: 'log', payload: { level: 'warn', text: 'Cancellation triggered — waiting for ZIP to finish…', category: 'upload' } });
+      this.post({ kind: 'uploadProgress', payload: { bytesTransferred: 0, totalBytes: 0, percent: 0, currentFile: 'Cancelling…' } });
       this.activeClient?.abort();
       return;
     }

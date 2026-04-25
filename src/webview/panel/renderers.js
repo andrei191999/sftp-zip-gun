@@ -64,6 +64,14 @@ function renderUploadView(app) {
     if (p.name === state.selectedPresetName) { opt.selected = true; }
     select.appendChild(opt);
   });
+  if (state.presets.length === 0) {
+    var optEmpty = document.createElement('option');
+    optEmpty.value = '';
+    optEmpty.textContent = 'No accounts configured \u2014 go to Manage';
+    optEmpty.disabled = true;
+    select.appendChild(optEmpty);
+    select.disabled = true;
+  }
   var _selOpt = select.options[select.selectedIndex];
   if (_selOpt) { select.title = _selOpt.textContent; }
   rowDest.appendChild(select);
@@ -722,6 +730,7 @@ function renderUploadView(app) {
   });
 
   stopBtn.addEventListener('click', function () {
+    state.uploadProgressText = 'Cancelling\u2026';
     vscode.postMessage({ kind: 'cancel' });
     render();
   });
@@ -779,7 +788,7 @@ function buildFileTable(container, filterStr, openFileRows) {
     return true;
   }).sort(function(a, b) { return a.name.localeCompare(b.name); });
 
-  var openVisible = (openFileRows || []).filter(function(of) {
+  var openVisible = openCollapsed ? [] : (openFileRows || []).filter(function(of) {
     return !filter || of.fileName.toLowerCase().includes(filter);
   }).sort(function(a, b) { return a.fileName.localeCompare(b.fileName); });
 
