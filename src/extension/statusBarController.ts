@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StateManager } from '../config/stateManager';
 
-export class StatusBarController {
+export class StatusBarController implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
   private spinnerTimer: ReturnType<typeof setInterval> | undefined;
   private readonly spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -50,5 +50,9 @@ export class StatusBarController {
       clearInterval(this.spinnerTimer);
       this.spinnerTimer = undefined;
     }
+  }
+
+  dispose(): void {
+    this.clearSpinner();
   }
 }

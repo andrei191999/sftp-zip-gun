@@ -23,6 +23,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const statusBar = new StatusBarController();
   statusBar.initialize(context, stateManager);
+  context.subscriptions.push(statusBar);
   try {
     await migrateOldPresets();
   } catch (error: unknown) {
@@ -57,7 +58,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         updateHasPresetsContext(presetManager);
         SftpPanel.currentPanel?.refreshPresets();
       }
-    })
+    }),
+
+    { dispose: () => SftpPanel.currentPanel?.dispose() }
   ];
 
   if (isTestMode()) {
