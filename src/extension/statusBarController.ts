@@ -54,5 +54,6 @@ export class StatusBarController implements vscode.Disposable {
 
   dispose(): void {
     this.clearSpinner();
+    this.item.dispose();
   }
 }

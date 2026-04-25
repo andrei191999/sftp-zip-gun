@@ -89,6 +89,7 @@ function resetLocalDatasetState() {
   state.zipGunMemory = null;
   state.fileUploadStatuses = {};
   state.groupUploadStatuses = {};
+  state.fileRowMap = new Map();
   state.uploadProgressText = null;
   clearUploadProgressRows();
 }
