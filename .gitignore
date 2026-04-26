@@ -2,6 +2,8 @@
 node_modules/
 dist/
 *.vsix
+media/panel.js
+media/panel.css
 
 # Secrets & private configs
 .env
