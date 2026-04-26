@@ -25,7 +25,7 @@ test.describe('upload history', () => {
     const localFile = path.join(os.tmpdir(), `e2e-hist-${Date.now()}.txt`);
     fs.writeFileSync(localFile, `e2e:history:${Date.now()}`);
 
-    const app = await launchVsCode([localFile]);
+    const { app, cleanup } = await launchVsCode([localFile]);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -65,6 +65,7 @@ test.describe('upload history', () => {
       const files = await entry.locator('.hentry-files').textContent();
       expect(files).toContain(name);
     } finally {
+      cleanup();
       await app.close();
     }
   });
@@ -73,7 +74,7 @@ test.describe('upload history', () => {
     const localFile = path.join(os.tmpdir(), `e2e-hist-ts-${Date.now()}.txt`);
     fs.writeFileSync(localFile, `e2e:history-ts:${Date.now()}`);
 
-    const app = await launchVsCode([localFile]);
+    const { app, cleanup } = await launchVsCode([localFile]);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -98,6 +99,7 @@ test.describe('upload history', () => {
         .textContent();
       expect(ts?.trim().length).toBeGreaterThan(0);
     } finally {
+      cleanup();
       await app.close();
     }
   });

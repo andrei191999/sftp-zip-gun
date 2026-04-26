@@ -33,12 +33,14 @@ function resolveCodeExe(): string {
  * @param testFiles - Absolute paths to files VS Code should open in editors.
  *   These appear in the webview's "open files" list without requiring native dialogs.
  */
-export async function launchVsCode(testFiles: string[] = []): Promise<ElectronApplication> {
+export async function launchVsCode(
+  testFiles: string[] = []
+): Promise<{ app: ElectronApplication; cleanup: () => void }> {
   const extensionRoot = path.resolve(__dirname, '..', '..', '..');
   const workspaceDir  = fs.mkdtempSync(path.join(os.tmpdir(), 'sftp-e2e-ws-'));
   const userDataDir   = fs.mkdtempSync(path.join(os.tmpdir(), 'sftp-e2e-user-'));
 
-  return electron.launch({
+  const app = await electron.launch({
     executablePath: resolveCodeExe(),
     args: [
       `--extensionDevelopmentPath=${extensionRoot}`,
@@ -49,6 +51,12 @@ export async function launchVsCode(testFiles: string[] = []): Promise<ElectronAp
       ...testFiles,
     ],
   });
+
+  const cleanup = (): void => {
+    try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  };
+  return { app, cleanup };
 }
 
 /**
@@ -59,14 +67,22 @@ export async function openPanelAndFindWebview(
   app: ElectronApplication,
   mainWindow: Page
 ): Promise<Page> {
-  const [webviewPage] = await Promise.all([
+  const [firstWindow] = await Promise.all([
     app.waitForEvent('window'),
     mainWindow.keyboard.press('Control+Shift+U'),
   ]);
 
-  // Wait for the panel DOM root to be ready
-  await webviewPage.waitForSelector('#app', { timeout: 30_000 });
-  return webviewPage;
+  // Verify this is the webview; if VS Code opened a different window first,
+  // scan all windows to find the one containing #app.
+  const isWebview = await firstWindow.locator('#app').waitFor({ timeout: 5_000 }).then(() => true).catch(() => false);
+  if (isWebview) return firstWindow;
+
+  for (const w of app.windows()) {
+    const has = await w.locator('#app').waitFor({ timeout: 1_000 }).then(() => true).catch(() => false);
+    if (has) return w;
+  }
+
+  throw new Error('SFTP Zip Gun webview window (#app) not found after Ctrl+Shift+U');
 }
 
 /**

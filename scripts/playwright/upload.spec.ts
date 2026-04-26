@@ -37,7 +37,7 @@ test.describe('upload — Pistol File', () => {
     const localFile = path.join(os.tmpdir(), `e2e-pistol-pw-${Date.now()}.txt`);
     fs.writeFileSync(localFile, `e2e:pistol-pw:${Date.now()}`);
 
-    const app = await launchVsCode([localFile]);
+    const { app, cleanup } = await launchVsCode([localFile]);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -53,6 +53,7 @@ test.describe('upload — Pistol File', () => {
       await waitFor(() => listFiles(dir).includes(name), `${name} not found in pwuser/store`);
       assertFileExists(dir, name);
     } finally {
+      cleanup();
       await app.close();
     }
   });
@@ -61,7 +62,7 @@ test.describe('upload — Pistol File', () => {
     const localFile = path.join(os.tmpdir(), `e2e-pistol-key-${Date.now()}.txt`);
     fs.writeFileSync(localFile, `e2e:pistol-key:${Date.now()}`);
 
-    const app = await launchVsCode([localFile]);
+    const { app, cleanup } = await launchVsCode([localFile]);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -77,6 +78,7 @@ test.describe('upload — Pistol File', () => {
       await waitFor(() => listFiles(dir).includes(name), `${name} not found in keyuser/store`);
       assertFileExists(dir, name);
     } finally {
+      cleanup();
       await app.close();
     }
   });
@@ -92,7 +94,7 @@ test.describe('upload — ZIP Canon', () => {
       return p;
     });
 
-    const app = await launchVsCode(files);
+    const { app, cleanup } = await launchVsCode(files);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -114,6 +116,7 @@ test.describe('upload — ZIP Canon', () => {
       const zips = listFiles(dir).filter(n => n.endsWith('.zip') && !before.has(n));
       expect(zips).toHaveLength(1);
     } finally {
+      cleanup();
       await app.close();
     }
   });
@@ -129,7 +132,7 @@ test.describe('upload — ZIP Gun', () => {
       return p;
     });
 
-    const app = await launchVsCode(files);
+    const { app, cleanup } = await launchVsCode(files);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -163,6 +166,7 @@ test.describe('upload — ZIP Gun', () => {
       const zips = listFiles(dir).filter(n => n.endsWith('.zip') && !before.has(n));
       expect(zips).toHaveLength(2);
     } finally {
+      cleanup();
       await app.close();
     }
   });

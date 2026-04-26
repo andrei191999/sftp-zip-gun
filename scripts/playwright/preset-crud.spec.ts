@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { assertDockerRunning } from './helpers/docker-check';
 import { launchVsCode, openPanelAndFindWebview, addPreset } from './helpers/launch-vscode';
 
 const BASE_PRESET = {
@@ -13,10 +12,8 @@ const BASE_PRESET = {
 };
 
 test.describe('preset CRUD', () => {
-  test.beforeEach(() => { assertDockerRunning(); });
-
   test('add preset — appears in dropdown', async () => {
-    const app = await launchVsCode();
+    const { app, cleanup } = await launchVsCode();
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -27,12 +24,13 @@ test.describe('preset CRUD', () => {
       const options = await panel.locator('#preset-select option').allTextContents();
       expect(options.some(t => t.includes(BASE_PRESET.name))).toBe(true);
     } finally {
+      cleanup();
       await app.close();
     }
   });
 
   test('edit preset name — renamed entry appears in dropdown', async () => {
-    const app = await launchVsCode();
+    const { app, cleanup } = await launchVsCode();
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -54,12 +52,13 @@ test.describe('preset CRUD', () => {
       expect(options.some(t => t.includes('CRUD Test Renamed'))).toBe(true);
       expect(options.some(t => t.includes(BASE_PRESET.name))).toBe(false);
     } finally {
+      cleanup();
       await app.close();
     }
   });
 
   test('delete preset — dropdown shows "No accounts configured"', async () => {
-    const app = await launchVsCode();
+    const { app, cleanup } = await launchVsCode();
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -78,6 +77,7 @@ test.describe('preset CRUD', () => {
       const selectText = await panel.locator('#preset-select').textContent();
       expect(selectText).toContain('No accounts configured');
     } finally {
+      cleanup();
       await app.close();
     }
   });

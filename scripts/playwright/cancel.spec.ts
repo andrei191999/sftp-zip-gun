@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { assertDockerRunning } from './helpers/docker-check';
-import { storeDir, listFiles } from './helpers/sftp-verify';
+import { storeDir, listFiles, waitFor } from './helpers/sftp-verify';
 import {
   launchVsCode, openPanelAndFindWebview, addPreset, selectPreset, selectFile,
 } from './helpers/launch-vscode';
@@ -40,7 +40,7 @@ test.describe('cancel — Pistol File', () => {
 
   test('cancel mid-upload leaves no file on server', async () => {
     const localFile = createLargeFile('pistol');
-    const app = await launchVsCode([localFile]);
+    const { app, cleanup } = await launchVsCode([localFile]);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -53,10 +53,13 @@ test.describe('cancel — Pistol File', () => {
       const before = new Set(listFiles(storeDir('pwuser')));
       await startAndCancel(panel);
 
-      await new Promise(r => setTimeout(r, 3_000));
-      const newFiles = listFiles(storeDir('pwuser')).filter(n => !before.has(n));
-      expect(newFiles).toHaveLength(0);
+      await waitFor(
+        () => listFiles(storeDir('pwuser')).filter(n => !before.has(n)).length === 0,
+        'unexpected files appeared after cancel',
+        8_000
+      );
     } finally {
+      cleanup();
       await app.close();
     }
   });
@@ -72,7 +75,7 @@ test.describe('cancel — ZIP Canon', () => {
       return p;
     });
 
-    const app = await launchVsCode(files);
+    const { app, cleanup } = await launchVsCode(files);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -86,10 +89,13 @@ test.describe('cancel — ZIP Canon', () => {
       const before = new Set(listFiles(storeDir('pwuser')));
       await startAndCancel(panel);
 
-      await new Promise(r => setTimeout(r, 3_000));
-      const newZips = listFiles(storeDir('pwuser')).filter(n => n.endsWith('.zip') && !before.has(n));
-      expect(newZips).toHaveLength(0);
+      await waitFor(
+        () => listFiles(storeDir('pwuser')).filter(n => n.endsWith('.zip') && !before.has(n)).length === 0,
+        'unexpected zip appeared after cancel',
+        8_000
+      );
     } finally {
+      cleanup();
       await app.close();
     }
   });
@@ -105,7 +111,7 @@ test.describe('cancel — ZIP Gun', () => {
       return p;
     });
 
-    const app = await launchVsCode(files);
+    const { app, cleanup } = await launchVsCode(files);
     try {
       const mainWindow = await app.firstWindow();
       await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
@@ -125,10 +131,13 @@ test.describe('cancel — ZIP Gun', () => {
       const before = new Set(listFiles(storeDir('pwuser')));
       await startAndCancel(panel);
 
-      await new Promise(r => setTimeout(r, 3_000));
-      const newZips = listFiles(storeDir('pwuser')).filter(n => n.endsWith('.zip') && !before.has(n));
-      expect(newZips).toHaveLength(0);
+      await waitFor(
+        () => listFiles(storeDir('pwuser')).filter(n => n.endsWith('.zip') && !before.has(n)).length === 0,
+        'unexpected zip appeared after cancel',
+        8_000
+      );
     } finally {
+      cleanup();
       await app.close();
     }
   });
