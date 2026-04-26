@@ -118,3 +118,52 @@ test.describe('upload — ZIP Canon', () => {
     }
   });
 });
+
+test.describe('upload — ZIP Gun', () => {
+  test.beforeEach(() => { assertDockerRunning(); });
+
+  test('groups 3 files into 2 zips and uploads both', async () => {
+    const files = [1, 2, 3].map(i => {
+      const p = path.join(os.tmpdir(), `e2e-gun-${Date.now()}-${i}.txt`);
+      fs.writeFileSync(p, `e2e:gun:${i}:${Date.now()}`);
+      return p;
+    });
+
+    const app = await launchVsCode(files);
+    try {
+      const mainWindow = await app.firstWindow();
+      await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
+      const panel = await openPanelAndFindWebview(app, mainWindow);
+
+      await addPreset(panel, PW_PRESET);
+      await selectPreset(panel, PW_PRESET.name);
+      await panel.click('.mode-half-zip-gun');
+
+      // Create two groups
+      await panel.click('button:has-text("→ New Group")');
+      await panel.click('button:has-text("→ New Group")');
+
+      // Assign via the group <select> in each file row
+      const groupSel = (fp: string) => {
+        const norm = fp.replace(/\\/g, '/');
+        return `tr[data-filepath="${fp}"] select, tr[data-filepath="${norm}"] select`;
+      };
+      await panel.locator(groupSel(files[0])).selectOption('1');
+      await panel.locator(groupSel(files[1])).selectOption('1');
+      await panel.locator(groupSel(files[2])).selectOption('2');
+
+      const dir    = storeDir('pwuser');
+      const before = new Set(listFiles(dir));
+      await panel.click('.btn-fire');
+
+      await waitFor(
+        () => listFiles(dir).filter(n => n.endsWith('.zip') && !before.has(n)).length >= 2,
+        '2 zip archives not found in pwuser/store'
+      );
+      const zips = listFiles(dir).filter(n => n.endsWith('.zip') && !before.has(n));
+      expect(zips).toHaveLength(2);
+    } finally {
+      await app.close();
+    }
+  });
+});
