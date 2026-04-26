@@ -81,3 +81,40 @@ test.describe('upload — Pistol File', () => {
     }
   });
 });
+
+test.describe('upload — ZIP Canon', () => {
+  test.beforeEach(() => { assertDockerRunning(); });
+
+  test('zips 3 files into one archive and uploads it', async () => {
+    const files = [1, 2, 3].map(i => {
+      const p = path.join(os.tmpdir(), `e2e-canon-${Date.now()}-${i}.txt`);
+      fs.writeFileSync(p, `e2e:canon:${i}:${Date.now()}`);
+      return p;
+    });
+
+    const app = await launchVsCode(files);
+    try {
+      const mainWindow = await app.firstWindow();
+      await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
+      const panel = await openPanelAndFindWebview(app, mainWindow);
+
+      await addPreset(panel, PW_PRESET);
+      await selectPreset(panel, PW_PRESET.name);
+      await panel.click('.mode-half-zip-canon');
+      for (const f of files) { await selectFile(panel, f); }
+
+      const dir    = storeDir('pwuser');
+      const before = new Set(listFiles(dir));
+      await panel.click('.btn-fire');
+
+      await waitFor(
+        () => listFiles(dir).some(n => n.endsWith('.zip') && !before.has(n)),
+        'zip archive not found in pwuser/store'
+      );
+      const zips = listFiles(dir).filter(n => n.endsWith('.zip') && !before.has(n));
+      expect(zips).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+});
