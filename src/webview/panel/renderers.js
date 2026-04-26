@@ -730,7 +730,7 @@ function renderUploadView(app) {
   });
 
   stopBtn.addEventListener('click', function () {
-    state.uploadProgressText = 'Cancelling\u2026';
+    if (state.uploading) { state.uploadProgressText = 'Cancelling\u2026'; }
     vscode.postMessage({ kind: 'cancel' });
     render();
   });
