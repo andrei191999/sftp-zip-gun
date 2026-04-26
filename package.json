@@ -50,7 +50,14 @@
     "qa:docker:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Stop-DockerQa.ps1",
     "qa:docker:purge": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Purge-DockerQa.ps1",
     "qa:smoke:dev": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeDev.ps1",
-    "qa:smoke:vsix": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeVsix.ps1"
+    "qa:smoke:vsix": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeVsix.ps1",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:upload": "playwright test upload --headed",
+    "test:e2e:cancel": "playwright test cancel --headed",
+    "test:e2e:presets": "playwright test preset-crud --headed",
+    "test:e2e:history": "playwright test history --headed"
   },
   "contributes": {
     "commands": [
