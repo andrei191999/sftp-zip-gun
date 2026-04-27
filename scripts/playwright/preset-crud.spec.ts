@@ -40,7 +40,7 @@ test.describe('preset CRUD', () => {
       await panel.click('.view-tab:has-text("Manage connections")');
       await panel.click(`.preset-card:has-text("${BASE_PRESET.name}") button:has-text("Edit")`);
 
-      const nameField = panel.locator('.row:has(label:has-text("Name")) input');
+      const nameField = panel.locator('.row:has(label:text-is("Name")) input');
       await nameField.clear();
       await nameField.fill('CRUD Test Renamed');
 
@@ -50,7 +50,7 @@ test.describe('preset CRUD', () => {
       await panel.click('.view-tab:has-text("Transfer files")');
       const options = await panel.locator('#preset-select option').allTextContents();
       expect(options.some(t => t.includes('CRUD Test Renamed'))).toBe(true);
-      expect(options.some(t => t.includes(BASE_PRESET.name))).toBe(false);
+      expect(options.some(t => t.trim() === BASE_PRESET.name)).toBe(false);
     } finally {
       cleanup();
       await app.close();

@@ -90,7 +90,8 @@ test.describe('FileZilla import', () => {
     const { app, cleanup } = await launchVsCode();
     try {
       const mainWindow = await app.firstWindow();
-      await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
+      await mainWindow.waitForSelector('.monaco-workbench', { timeout: 45_000 });
+      await new Promise(r => setTimeout(r, 2_000));  // Extra settle time after workbench ready
       const panel = await openPanelAndFindWebview(app, mainWindow);
 
       await panel.click('.view-tab:has-text("Manage connections")');

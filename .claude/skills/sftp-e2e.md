@@ -20,6 +20,9 @@ npm run compile            # must exit 0
 
 If docker is not running: `npm run qa:docker:start`
 
+**VS Code must not have a pending update.** If VS Code exits immediately during tests
+with "Code is currently being updated", open VS Code normally, let it restart, then retry.
+
 ## Command Map
 
 | Scenario | Command |
@@ -38,9 +41,21 @@ If docker is not running: `npm run qa:docker:start`
 - **Exit 1** = read stdout for the failed assertion
 
 Common failures:
-- **Selector not found / timeout**: webview DOM changed — search `renderers.js` for the updated element
-- **Docker error**: run `npm run qa:docker:start`
-- **Launch timeout**: VS Code took too long — increase `timeout` in `playwright.config.ts`
+
+| Error | Cause | Fix |
+|---|---|---|
+| `#app not found within 30s` | Extension not activating or panel not opening | Check extension compiled (`npm run compile`); verify VS Code is not mid-update |
+| `Selector not found / timeout` | Webview DOM changed | Search `media/panel.js` for the updated element |
+| `strict mode violation: resolved to N elements` | Selector too broad (substring match) | Use `:text-is("...")` instead of `:has-text("...")` for exact label matching |
+| Docker error | Container not running | `npm run qa:docker:start` |
+| Launch timeout | VS Code slow to start | Increase `timeout` in `playwright.config.ts` |
+
+## Architecture Notes
+
+- **Webview detection**: Modern VS Code (1.70+) renders extension panels as `<iframe>` inside the main window, not as a new Electron `BrowserWindow`. `launchVsCode` polls both `app.windows()` and `mainWindow.frames()` until `#app` is found.
+- **Panel activation**: Tests open the panel via command palette (`Ctrl+Shift+P` → "Open Upload Panel") rather than the `Ctrl+Shift+U` keybinding, which has a `when: resourceScheme == file` guard that fails when no editor is open.
+- **Workspace trust**: Disabled via `settings.json` pre-written into the temp `--user-data-dir` so the trust dialog never blocks the test flow.
+- **Updates**: `--disable-updates` prevents VS Code from auto-updating during test runs.
 
 ## Docker Fixture Reference
 

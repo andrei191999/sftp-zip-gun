@@ -76,7 +76,9 @@ test.describe.serial('ui-state', () => {
     panel = await openPanelAndFindWebview(app, mainWindow);
     shared!.panel = panel;  // keep shared reference in sync
 
-    // Mode is restored from vscode.setState — no need to re-select preset
+    // Mode is restored from vscode.setState — wait for mode buttons to render
+    // (they're only in the Transfer tab, not Manage, so ensure Transfer is active)
+    await panel.waitForSelector('.mode-half', { timeout: 10_000 });
     const active = panel.locator('.mode-half-zip-canon');
     await expect(active).toHaveClass(/active/);
   });

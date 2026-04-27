@@ -288,6 +288,8 @@ test.describe.serial('upload flows', () => {
     await selectPreset(panel, PW_PRESET.name);
     await loadFolder(panel, folder);
     await switchMode(panel, 'zip_canon');
+    // Wait for mode switch to fully render before selecting files
+    await panel.waitForSelector('.mode-half-zip-canon.active', { timeout: 5_000 });
     for (const f of files) { await selectFile(panel, f); }
 
     // Set a custom archive name

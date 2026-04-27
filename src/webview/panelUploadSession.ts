@@ -272,6 +272,7 @@ export class PanelUploadSession {
           }
         } finally {
           this.resetState();
+          this.post({ kind: 'history', payload: { entries: this.stateManager.getHistory() } });
         }
       }
     );

@@ -282,7 +282,8 @@ test.describe.serial('bookmark flows', () => {
       await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
 
       const breadcrumbDeep = await panel.locator('.overlay .breadcrumb').textContent();
-      expect(breadcrumbDeep).toContain('store');
+      // Breadcrumb format is like "/store" or "///store" — just check that 'store' appears
+      expect(breadcrumbDeep?.trim()).toMatch(/store/);
 
       // Click root "/" in breadcrumb
       await panel.locator('.overlay .breadcrumb span').first().click();

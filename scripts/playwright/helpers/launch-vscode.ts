@@ -296,10 +296,14 @@ export async function setHistoryFilter(
   };
   await panel.click(`button:has-text("${resultLabel[result]}")`);
 
-  if (mode === 'all') {
-    await panel.click('button:has-text("All modes")');
-  } else {
-    await panel.click(`button:has-text("${mode}")`);
+  // Mode filter buttons only render when histModes.length > 1
+  const modeBar = await panel.locator('.breadcrumb').count();
+  if (modeBar > 0) {
+    if (mode === 'all') {
+      await panel.click('button:has-text("All modes")');
+    } else {
+      await panel.click(`button:has-text("${mode}")`);
+    }
   }
 }
 

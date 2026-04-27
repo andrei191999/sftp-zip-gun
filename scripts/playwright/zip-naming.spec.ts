@@ -158,7 +158,7 @@ test.describe.serial('zip naming UI', () => {
   test('zip_gun — New Group increments group count', async () => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'zg-new-group');
-    makeFiles(folder, 3);
+    const files = makeFiles(folder, 3);
 
     await selectPreset(panel, PW_PRESET.name);
     await loadFolder(panel, folder);
@@ -166,6 +166,9 @@ test.describe.serial('zip naming UI', () => {
 
     // Before: no group headers exist (no groups yet after reset)
     const headersBefore = await panel.locator('tr.group-header-row').count();
+
+    // Select a file before creating a new group (New Group button requires selectedFiles.length > 0)
+    await selectFile(panel, files[0]);
 
     await panel.click('button:has-text("\u2192 New Group")');
 
