@@ -185,6 +185,11 @@ test.describe.serial('zip naming UI', () => {
 
     await selectPreset(panel, PW_PRESET.name);
     await loadFolder(panel, folder);
+    // Expand the Files section if it collapsed during a previous test
+    if (await panel.locator('#section-files .section-body').count() === 0) {
+      await panel.locator('#section-files .section-header button.section-toggle').click();
+      await panel.waitForSelector('#section-files .section-body', { timeout: 5_000 });
+    }
     await switchMode(panel, 'zip_gun');
 
     // Select a file first — New Group button requires selectedFiles.length > 0

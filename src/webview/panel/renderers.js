@@ -652,8 +652,7 @@ function renderUploadView(app) {
         state.groupAnchors = {};
         state.selectedFiles.clear();
         persistState();
-        buildFileTable(fileListContainer, fileFilter ? fileFilter.value : '', openFileRows);
-        if (_updateFileControlsFn) { _updateFileControlsFn(); }
+        render();
       });
     }
 

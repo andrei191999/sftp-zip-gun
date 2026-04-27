@@ -325,7 +325,8 @@ test.describe.serial('upload flows', () => {
     // Select base-counter naming
     await panel.locator('input[type="radio"][name="groupNaming"][value="base-counter"]').check();
     // Fill base name
-    await panel.locator('.row:has(label:text-is("Base name")) input').fill('myarchive');
+    const baseName = `myarchive-${Date.now()}`;
+    await panel.locator('.row:has(label:text-is("Base name")) input').fill(baseName);
 
     // Each file in its own group
     await panel.locator(groupSel(files[0])).selectOption('__new__');
@@ -341,7 +342,7 @@ test.describe.serial('upload flows', () => {
     );
     const zips = listFiles(dir).filter(n => n.endsWith('.zip') && !before.has(n));
     expect(zips.length).toBeGreaterThanOrEqual(2);
-    expect(zips.some(n => n.includes('myarchive'))).toBe(true);
+    expect(zips.some(n => n.includes(baseName))).toBe(true);
     await waitForUploadIdle(panel);
   });
 

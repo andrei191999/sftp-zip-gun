@@ -169,6 +169,7 @@ test.describe.serial('connection and preset management', () => {
 
     // Cancel the edit to avoid side effects
     await panel.click('#preset-form-section button:has-text("Cancel")');
+    await panel.waitForSelector('#preset-form-section button:has-text("+ Add Account")', { timeout: 10_000 });
   });
 
   // -------------------------------------------------------------------------

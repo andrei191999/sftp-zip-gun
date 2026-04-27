@@ -276,9 +276,14 @@ export async function openLogTab(panel: PanelTarget): Promise<void> {
   await panel.click('button:has-text("Session Logs")');
 }
 
-/** Clicks the "Upload History" tab button. */
+/** Clicks the "Upload History" tab button. Only navigates if tab is not already active. */
 export async function openHistoryTab(panel: PanelTarget): Promise<void> {
-  await panel.click('button:has-text("Upload History")');
+  // Only navigate to history tab if not already there (clicking active tab toggles it off)
+  const allBtn = panel.locator('button:text-is("All")');
+  if (await allBtn.count() === 0) {
+    await panel.click('button:has-text("Upload History")');
+    await allBtn.waitFor({ timeout: 5_000 });
+  }
 }
 
 /** Returns a locator for all .history-entry elements. */

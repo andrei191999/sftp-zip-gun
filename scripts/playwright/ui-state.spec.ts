@@ -129,6 +129,11 @@ test.describe.serial('ui-state', () => {
     // Section body should still be collapsed (not in DOM)
     const bodyCount = await panel.locator('#section-files .section-body').count();
     expect(bodyCount).toBe(0);
+
+    // Restore expanded state so subsequent tests find tr[data-filepath] rows
+    const sectionToggle = panel.locator('#section-files .section-header button.section-toggle');
+    await sectionToggle.click();
+    await panel.waitForSelector('#section-files .section-body', { timeout: 5_000 });
   });
 
   // ---------------------------------------------------------------------------
@@ -375,6 +380,11 @@ test.describe.serial('ui-state', () => {
     await loadFolder(panel, folder);
     const bodyCount = await panel.locator('#section-files .section-body').count();
     expect(bodyCount).toBe(0);
+
+    // Restore expanded state so subsequent tests find tr[data-filepath] rows
+    const sectionToggle = panel.locator('#section-files .section-header button.section-toggle');
+    await sectionToggle.click();
+    await panel.waitForSelector('#section-files .section-body', { timeout: 5_000 });
   });
 
   // ---------------------------------------------------------------------------
