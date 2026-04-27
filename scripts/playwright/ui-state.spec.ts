@@ -124,9 +124,7 @@ test.describe.serial('ui-state', () => {
     panel = await openPanelAndFindWebview(app, mainWindow);
     shared!.panel = panel;
 
-    // Reload the folder so the section renders
     await selectPreset(panel, PRESET.name);
-    await loadFolder(panel, folder);
 
     // Section body should still be collapsed (not in DOM)
     const bodyCount = await panel.locator('#section-files .section-body').count();

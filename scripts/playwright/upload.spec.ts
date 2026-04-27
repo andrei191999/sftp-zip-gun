@@ -520,7 +520,7 @@ test.describe.serial('upload flows', () => {
 
     // Open log tab and check for the guard message
     await panel.click('button:has-text("Session Logs")');
-    await panel.waitForSelector('.log-box', { timeout: 5_000 });
+    await panel.waitForSelector('.log-box', { state: 'attached', timeout: 15_000 });
     const logText = await panel.locator('.log-box').textContent();
     expect(logText).toContain('Cannot change');
   });

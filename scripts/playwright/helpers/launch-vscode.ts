@@ -61,6 +61,9 @@ export async function launchVsCode(): Promise<{
       `--extensionDevelopmentPath=${extensionRoot}`,
       '--disable-updates',
       '--no-sandbox',
+      '--disable-extension=googlecloudtools.cloudcode',
+      '--disable-extension=google.geminicodeassist',
+      '--disable-extension=ms-toolsai.jupyter',
       `--user-data-dir=${userDataDir}`,
       workspaceDir,
     ],
@@ -294,7 +297,7 @@ export async function setHistoryFilter(
     success: '✓ Success',
     error: '✗ Errors',
   };
-  await panel.click(`button:has-text("${resultLabel[result]}")`);
+  await panel.click(`button:text-is("${resultLabel[result]}")`);
 
   // Mode filter buttons only render when histModes.length > 1
   const modeBar = await panel.locator('.breadcrumb').count();

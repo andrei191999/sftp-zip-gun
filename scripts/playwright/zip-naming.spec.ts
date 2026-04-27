@@ -187,6 +187,9 @@ test.describe.serial('zip naming UI', () => {
     await loadFolder(panel, folder);
     await switchMode(panel, 'zip_gun');
 
+    // Select a file first — New Group button requires selectedFiles.length > 0
+    await selectFile(panel, files[0]);
+
     // Create two groups
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
