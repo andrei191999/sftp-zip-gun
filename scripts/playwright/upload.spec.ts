@@ -385,10 +385,11 @@ test.describe.serial('upload flows', () => {
   test('zip_gun — anchor naming: zip named after anchor file', async () => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'gun-anchor');
-    const anchorFile = path.join(folder, 'anchor-file.txt');
-    const otherFile  = path.join(folder, 'other-file.txt');
-    fs.writeFileSync(anchorFile, `e2e:anchor:${Date.now()}`);
-    fs.writeFileSync(otherFile,  `e2e:other:${Date.now()}`);
+    const ts = Date.now();
+    const anchorFile = path.join(folder, `anchor-file-${ts}.txt`);
+    const otherFile  = path.join(folder, `other-file-${ts}.txt`);
+    fs.writeFileSync(anchorFile, `e2e:anchor:${ts}`);
+    fs.writeFileSync(otherFile,  `e2e:other:${ts}`);
 
     await selectPreset(panel, PW_PRESET.name);
     await loadFolder(panel, folder);

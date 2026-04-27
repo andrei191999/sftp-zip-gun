@@ -213,6 +213,7 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — breadcrumb shows current path segment', async () => {
     const { panel } = session();
+    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
@@ -240,6 +241,7 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — breadcrumb navigation: click segment navigates back', async () => {
     const { panel } = session();
+    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
@@ -298,6 +300,7 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — pin as default updates preset default path', async () => {
     const { panel } = session();
+    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
@@ -335,6 +338,7 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — bookmark from overlay saves to bookmarks list', async () => {
     const { panel } = session();
+    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);

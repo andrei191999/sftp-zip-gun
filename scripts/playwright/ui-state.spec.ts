@@ -376,8 +376,8 @@ test.describe.serial('ui-state', () => {
     // Verify DOM collapsed (section-body gone)
     await panel.waitForSelector('#section-files .section-body', { state: 'detached', timeout: 5_000 });
 
-    // Reload same folder — section should stay collapsed
-    await loadFolder(panel, folder);
+    // Reload same folder — section should stay collapsed (skip row wait since body is detached)
+    await loadFolder(panel, folder, { waitForRows: false });
     const bodyCount = await panel.locator('#section-files .section-body').count();
     expect(bodyCount).toBe(0);
 

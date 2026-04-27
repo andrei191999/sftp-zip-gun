@@ -236,7 +236,7 @@ export async function selectPreset(panel: PanelTarget, presetName: string): Prom
  *
  * Call this after selectPreset and before selectFile.
  */
-export async function loadFolder(panel: PanelTarget, folderPath: string): Promise<void> {
+export async function loadFolder(panel: PanelTarget, folderPath: string, opts?: { waitForRows?: boolean }): Promise<void> {
   const normalized = folderPath.replace(/\\/g, '/');
   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
   const files = entries
@@ -252,8 +252,10 @@ export async function loadFolder(panel: PanelTarget, folderPath: string): Promis
     },
     { fp: normalized, fs: files }
   );
-  // Wait for at least one file row to appear in the DOM.
-  await panel.waitForSelector('tr[data-filepath]', { timeout: 10_000 });
+  if (opts?.waitForRows !== false) {
+    // Wait for at least one file row to appear in the DOM.
+    await panel.waitForSelector('tr[data-filepath]', { timeout: 10_000 });
+  }
 }
 
 /**

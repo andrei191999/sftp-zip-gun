@@ -647,9 +647,10 @@ function renderUploadView(app) {
 
     if (clearGroupsBtn) {
       clearGroupsBtn.addEventListener('click', function() {
-        // Keep group containers (G1, G2...); un-assign files and deselect
+        state.groups       = [];
         state.fileGroups   = [];
         state.groupAnchors = {};
+        state.nextGroupId  = 1;
         state.selectedFiles.clear();
         persistState();
         render();
@@ -1933,6 +1934,11 @@ function buildPresetForm(container) {
       readOnly:   readonlyCheck ? readonlyCheck.checked : !!p.readOnly,
     };
   }
+
+  // Keep formDraft in sync on every keystroke so host-message re-renders preserve typed values.
+  [nameInput, hostInput, portInput, userInput, dirInput].forEach(function(inp) {
+    inp.addEventListener('input', captureFormDraft);
+  });
 
   browseDefaultBtn.addEventListener('click', function () {
     if (!state.editingPreset) { return; }

@@ -216,6 +216,7 @@ test.describe.serial('zip naming UI', () => {
     // and no group header rows should exist
     await panel.waitForFunction(
       () => document.querySelectorAll('tr.group-header-row').length === 0,
+      null,
       { timeout: 5_000 }
     );
     const remaining = await panel.locator('tr.group-header-row').count();
