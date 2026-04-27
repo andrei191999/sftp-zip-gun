@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FileZilla3 version="3.66.0" platform="windows">
+  <Servers>
+    <Server>
+      <Host>sftp.example.com</Host>
+      <Port>22</Port>
+      <Protocol>1</Protocol>
+      <Type>0</Type>
+      <User>alice</User>
+      <Pass encoding="base64">cGFzc3dvcmQx</Pass>
+      <Name>Alice SFTP</Name>
+      <RemoteDir>/uploads/alice</RemoteDir>
+    </Server>
+    <Server>
+      <Host>backup.example.org</Host>
+      <Port>2222</Port>
+      <Protocol>1</Protocol>
+      <Type>0</Type>
+      <User>bob</User>
+      <Pass encoding="base64">cGFzc3dvcmQy</Pass>
+      <Name>Bob Backup</Name>
+      <RemoteDir>/home/bob</RemoteDir>
+    </Server>
+    <Server>
+      <Host>invalid.example.com</Host>
+      <Port>22</Port>
+      <Protocol>1</Protocol>
+      <Type>0</Type>
+      <User>nobody</User>
+      <Name></Name>
+    </Server>
+  </Servers>
+</FileZilla3>

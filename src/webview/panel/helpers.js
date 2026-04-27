@@ -497,7 +497,19 @@ function buildLogBox(container) {
     if (!entry.category) { return true; }            // uncategorised always show
     return state.logFilter.has(entry.category);
   });
-  visible.forEach(function (entry) {
+  if (state.uploading && state.uploadProgressText) {
+    var pLine = document.createElement('div');
+    pLine.className = 'log-progress';
+    var pCat = document.createElement('span');
+    pCat.className = 'log-cat log-cat-upload';
+    pCat.textContent = 'upload';
+    var pTxt = document.createElement('span');
+    pTxt.textContent = state.uploadProgressText;
+    pLine.appendChild(pCat);
+    pLine.appendChild(pTxt);
+    pre.appendChild(pLine);
+  }
+  visible.slice().reverse().forEach(function (entry) {
     var line = document.createElement('div');
     if (entry.level === 'session') {
       line.className = 'log-session';
@@ -520,21 +532,9 @@ function buildLogBox(container) {
     }
     pre.appendChild(line);
   });
-  if (state.uploading && state.uploadProgressText) {
-    var pLine = document.createElement('div');
-    pLine.className = 'log-progress';
-    var pCat = document.createElement('span');
-    pCat.className = 'log-cat log-cat-upload';
-    pCat.textContent = 'upload';
-    var pTxt = document.createElement('span');
-    pTxt.textContent = state.uploadProgressText;
-    pLine.appendChild(pCat);
-    pLine.appendChild(pTxt);
-    pre.appendChild(pLine);
-  }
   container.appendChild(pre);
-  // Defer scroll until the element is in the DOM and fully laid out.
-  requestAnimationFrame(function () { pre.scrollTop = pre.scrollHeight; });
+  // Scroll to top to show newest entries first.
+  requestAnimationFrame(function () { pre.scrollTop = 0; });
   return pre;
 }
 

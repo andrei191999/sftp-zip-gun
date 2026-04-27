@@ -54,10 +54,18 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:upload": "playwright test upload --headed",
+    "test:e2e:upload": "playwright test scripts/playwright/upload.spec.ts --headed",
     "test:e2e:cancel": "playwright test cancel --headed",
+    "test:e2e:transfer": "playwright test scripts/playwright/upload.spec.ts scripts/playwright/cancel.spec.ts scripts/playwright/history.spec.ts --headed",
     "test:e2e:presets": "playwright test preset-crud --headed",
-    "test:e2e:history": "playwright test history --headed"
+    "test:e2e:history": "playwright test history --headed",
+    "test:e2e:state": "playwright test scripts/playwright/ui-state.spec.ts scripts/playwright/zip-naming.spec.ts --headed",
+    "test:e2e:openfiles": "playwright test scripts/playwright/open-files.spec.ts --headed",
+    "test:e2e:filezilla": "playwright test scripts/playwright/filezilla.spec.ts --headed",
+    "test:e2e:filters": "playwright test scripts/playwright/history-filter.spec.ts --headed",
+    "test:e2e:conn": "playwright test scripts/playwright/connection.spec.ts --headed",
+    "test:e2e:bookmarks": "playwright test scripts/playwright/bookmarks.spec.ts --headed",
+    "test:e2e:all": "playwright test scripts/playwright/ --headed"
   },
   "contributes": {
     "commands": [

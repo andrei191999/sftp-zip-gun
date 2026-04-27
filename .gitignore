@@ -10,6 +10,7 @@ media/panel.css
 .env.*
 filezilla-small.xml
 filezilla*.xml
+!scripts/playwright/fixtures/*.xml
 *.pem
 *.key
 *.crt
