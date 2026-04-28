@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
-import { launchVsCode, openPanelAndFindWebview } from './helpers/launch-vscode';
+import { launchVsCode, openLogTab, openPanelAndFindWebview } from './helpers/launch-vscode';
 import type { PresetMeta } from '../../src/types/messages';
 
 // ---------------------------------------------------------------------------
@@ -47,11 +47,41 @@ async function injectFileZillaImported(
   }
 ): Promise<void> {
   await panel.evaluate((p) => {
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { kind: 'fileZillaImported', payload: p },
-      })
-    );
+    const restoreTransport = (() => {
+      try {
+        const webviewHost = (window as Window & {
+          chrome?: { webview?: { postMessage?: (message: unknown) => void } };
+        }).chrome?.webview;
+        if (webviewHost && typeof webviewHost.postMessage === 'function') {
+          const originalPostMessage = webviewHost.postMessage.bind(webviewHost);
+          webviewHost.postMessage = () => undefined;
+          return () => { webviewHost.postMessage = originalPostMessage; };
+        }
+      } catch { /* fall through */ }
+
+      try {
+        const parentWindow = window.parent as Window & {
+          postMessage?: (message: unknown, targetOrigin: string, transfer?: Transferable[]) => void;
+        };
+        if (typeof parentWindow.postMessage === 'function') {
+          const originalPostMessage = parentWindow.postMessage.bind(parentWindow);
+          parentWindow.postMessage = () => undefined;
+          return () => { parentWindow.postMessage = originalPostMessage; };
+        }
+      } catch { /* ignore */ }
+
+      return () => {};
+    })();
+
+    try {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { kind: 'fileZillaImported', payload: p },
+        })
+      );
+    } finally {
+      restoreTransport();
+    }
   }, payload);
 }
 
@@ -229,10 +259,7 @@ test.describe('FileZilla import', () => {
         newPresetNames: [],
       });
 
-      // The import result is pushed to the session log. pushLog() auto-opens
-      // the log pane (logActiveTab = 'log'), so .log-box is rendered.
-      // Entries are shown newest-first; the latest log line is the first div
-      // in .log-box that contains the result text.
+      await openLogTab(panel);
       await expect(
         panel.locator('.log-box').getByText('2 duplicate(s)', { exact: false })
       ).toBeVisible({ timeout: 10_000 });

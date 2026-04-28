@@ -8,9 +8,98 @@ import { installHighlight } from './visual-debug';
 type PanelTarget = Frame | Page;
 type UploadMode = 'pistol_file' | 'zip_canon' | 'zip_gun';
 type PanelView = 'manage' | 'transfer';
+const VSCODE_CLOSE_TIMEOUT_MS = 15_000;
+const VSCODE_FORCE_KILL_WAIT_MS = 5_000;
 
 function isHeadedRun(): boolean {
   return process.env.HEADED !== '0';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'EPERM') {
+      return true;
+    }
+    return false;
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return true;
+    }
+    await sleep(200);
+  }
+  return !isProcessAlive(pid);
+}
+
+function forceKillProcessTree(pid: number): void {
+  if (process.platform === 'win32') {
+    try {
+      execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } catch {
+      // ignore: process may already be gone
+    }
+    return;
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // ignore: process may already be gone
+  }
+}
+
+function installBoundedClose(app: ElectronApplication): void {
+  const launchedPid = app.process()?.pid;
+  if (!launchedPid) return;
+
+  const originalClose = app.close.bind(app);
+  let closePromise: Promise<void> | undefined;
+
+  Object.defineProperty(app, 'close', {
+    configurable: true,
+    value: async (): Promise<void> => {
+      if (closePromise) {
+        return closePromise;
+      }
+
+      closePromise = (async () => {
+        const gracefulClose = originalClose();
+
+        try {
+          await Promise.race([
+            gracefulClose,
+            sleep(VSCODE_CLOSE_TIMEOUT_MS).then(() => {
+              throw new Error(`Timed out closing VS Code after ${VSCODE_CLOSE_TIMEOUT_MS}ms`);
+            }),
+          ]);
+          await gracefulClose;
+          return;
+        } catch (error) {
+          if (isProcessAlive(launchedPid)) {
+            forceKillProcessTree(launchedPid);
+            await waitForProcessExit(launchedPid, VSCODE_FORCE_KILL_WAIT_MS);
+          }
+
+          if (isProcessAlive(launchedPid)) {
+            throw error;
+          }
+        }
+      })();
+
+      return closePromise;
+    },
+  });
 }
 
 function getVsCodeLaunchArgs(extensionRoot: string, userDataDir: string, workspaceDir: string): string[] {
@@ -109,7 +198,7 @@ async function findVisiblePanelTarget(
 async function isPanelTargetReady(target: PanelTarget): Promise<boolean> {
   const appRoot = target.locator('#app').first();
   if ((await appRoot.count()) === 0) return false;
-  if (isHeadedRun() && !(await appRoot.isVisible())) return false;
+  if (!(await appRoot.isVisible())) return false;
 
   const transferTab = target.locator('.view-tab:has-text("Transfer files")').first();
   const manageTab = target.locator('.view-tab:has-text("Manage connections")').first();
@@ -267,6 +356,7 @@ export async function launchVsCode(): Promise<{
     executablePath: resolveCodeExe(),
     args,
   });
+  installBoundedClose(app);
 
   const workerIndex = Number(process.env.TEST_PARALLEL_INDEX ?? '0');
   const workerCount = Number(process.env.WORKERS ?? '1');
@@ -482,46 +572,55 @@ export async function addPreset(
   }
 ): Promise<void> {
   await openManageTab(panel);
-  await panel.locator('button:has-text("+ Add Account")').evaluate((button: HTMLButtonElement) => button.click());
+  await panel.locator('button:has-text("+ Add Account")').click();
 
   const form = panel.locator('#preset-form-section');
-  await form.locator('input[placeholder="My Server"]').fill(preset.name);
-  await form.locator('input[placeholder="sftp.example.com"]').fill(preset.host);
-  await form.locator('input[type="number"]').fill(String(preset.port));
-  await form.locator('input[placeholder="username"]').fill(preset.username);
-  await form.locator('input[placeholder="/uploads"]').fill(preset.remoteDir);
+  await expect(form).toBeVisible({ timeout: 10_000 });
+
+  const nameInput = form.locator('input[placeholder="My Server"]');
+  const hostInput = form.locator('input[placeholder="sftp.example.com"]');
+  const portInput = form.locator('input[type="number"]');
+  const usernameInput = form.locator('input[placeholder="username"]');
+  const remoteDirInput = form.locator('input[placeholder="/uploads"]');
+
+  await expect(nameInput).toBeVisible({ timeout: 10_000 });
+  await expect(hostInput).toBeVisible({ timeout: 10_000 });
+  await expect(portInput).toBeVisible({ timeout: 10_000 });
+  await expect(usernameInput).toBeVisible({ timeout: 10_000 });
+  await expect(remoteDirInput).toBeVisible({ timeout: 10_000 });
+
+  await nameInput.fill(preset.name);
+  await hostInput.fill(preset.host);
+  await portInput.fill(String(preset.port));
+  await usernameInput.fill(preset.username);
+  await remoteDirInput.fill(preset.remoteDir);
 
   if (preset.authType === 'key') {
-    await form.locator('input[type="radio"][value="key"]').evaluate((input: HTMLInputElement) => {
-      input.checked = true;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const keyRadio = form.locator('input[type="radio"][value="key"]');
+    await keyRadio.click();
     const keyInput = form.locator('#f-auth-fields input[placeholder="/home/user/.ssh/id_rsa"]');
-    await expect(async () => {
-      await keyInput.waitFor({ state: 'visible', timeout: 2_000 });
-      await keyInput.fill(preset.keyPath ?? '');
-      await expect(keyInput).toHaveValue(preset.keyPath ?? '', { timeout: 2_000 });
-    }).toPass({ timeout: 15_000 });
+    await expect(keyInput).toBeVisible({ timeout: 15_000 });
+    await keyInput.fill(preset.keyPath ?? '');
+    await expect(keyInput).toHaveValue(preset.keyPath ?? '', { timeout: 2_000 });
   } else {
-    await form.locator('input[type="radio"][value="password"]').evaluate((input: HTMLInputElement) => {
-      input.checked = true;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const passwordRadio = form.locator('input[type="radio"][value="password"]');
+    await passwordRadio.click();
     if (preset.password) {
       const passwordInput = form.locator('#f-auth-fields input[type="password"]');
-      await expect(async () => {
-        await passwordInput.waitFor({ state: 'visible', timeout: 2_000 });
-        await passwordInput.fill(preset.password ?? '');
-        await expect(passwordInput).toHaveValue(preset.password ?? '', { timeout: 2_000 });
-      }).toPass({ timeout: 15_000 });
+      await expect(passwordInput).toBeVisible({ timeout: 15_000 });
+      await passwordInput.fill(preset.password ?? '');
+      await expect(passwordInput).toHaveValue(preset.password ?? '', { timeout: 2_000 });
     }
   }
 
+  const saveButton = form.locator('button:text-is("Save")');
+  await expect(saveButton).toBeVisible({ timeout: 10_000 });
+  await saveButton.evaluate((button: HTMLButtonElement) => button.click());
+
+  const presetCard = panel.locator(`.preset-card:has-text("${preset.name}")`);
   await expect(async () => {
-    const saveButton = form.locator('button:text-is("Save")');
-    await saveButton.waitFor({ state: 'visible', timeout: 2_000 });
-    await saveButton.evaluate((button: HTMLButtonElement) => button.click());
     await expect(form).toBeHidden({ timeout: 3_000 });
+    await expect(presetCard).toBeVisible({ timeout: 3_000 });
   }).toPass({ timeout: 45_000 });
   await openTransferTab(panel);
   await expect(panel.locator(`#preset-select option[value="${preset.name}"]`)).toHaveCount(1, { timeout: 10_000 });
