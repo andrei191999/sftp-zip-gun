@@ -46,6 +46,43 @@ test.describe.serial('bookmark flows', () => {
     return shared;
   }
 
+  async function closeOverlayIfOpen(): Promise<void> {
+    const { panel } = session();
+    if (await panel.locator('.overlay').count() === 0) {
+      return;
+    }
+    await panel.locator('.overlay button:has-text("Cancel")').evaluate((button: HTMLButtonElement) => button.click());
+    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 10_000 }).catch(() => {});
+  }
+
+  async function waitForPresetForm(): Promise<void> {
+    const { panel } = session();
+    const form = panel.locator('#preset-form-section');
+    await expect(form.locator('input[placeholder="My Server"]')).toBeVisible({ timeout: 10_000 });
+  }
+
+  async function waitForAddPathInput() {
+    const { panel } = session();
+    const input = panel.locator('input[placeholder="/remote/path"]');
+    await expect(input).toBeVisible({ timeout: 10_000 });
+    return input;
+  }
+
+  async function fillAddPathInput(value: string): Promise<void> {
+    await expect(async () => {
+      const input = await waitForAddPathInput();
+      await input.fill(value);
+      await expect(input).toHaveValue(value, { timeout: 2_000 });
+    }).toPass({ timeout: 10_000 });
+  }
+
+  async function clickAddPathBrowse(): Promise<void> {
+    const { panel } = session();
+    const browseBtn = panel.locator('.row:has(input[placeholder="/remote/path"]) button:has-text("Browse")').first();
+    await expect(browseBtn).toBeVisible({ timeout: 10_000 });
+    await browseBtn.evaluate((button: HTMLButtonElement) => button.click());
+  }
+
   // -------------------------------------------------------------------------
   // Test 1: add bookmark via form — appears in send-to dropdown
   // -------------------------------------------------------------------------
@@ -54,16 +91,19 @@ test.describe.serial('bookmark flows', () => {
 
     // Open Manage tab, click Edit on the preset card
     await openManageTab(panel);
-    await panel.click(`.preset-card:has-text("${PRESET.name}") button:has-text("Edit")`);
+    await panel.locator(`.preset-card:has-text("${PRESET.name}") button:has-text("Edit")`).evaluate((button: HTMLButtonElement) => button.click());
+    await waitForPresetForm();
 
     // Click "Browse & add…" in the Bookmarks section
-    await panel.click('button:has-text("Browse & add")');
+    const browseAddBtn = panel.locator('#preset-form-section button:has-text("Browse & add")');
+    await expect(browseAddBtn).toBeVisible({ timeout: 10_000 });
+    await browseAddBtn.evaluate((button: HTMLButtonElement) => button.click());
 
     // Remote browse overlay appears — wait for it
     await panel.waitForSelector('.overlay', { timeout: 15_000 });
 
     // Wait for the directory listing to finish loading (spinner gone, dir-list appears)
-    await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
+    await panel.waitForSelector('.overlay .dir-list', { timeout: 45_000 });
 
     // Click "✓ Use this path" to accept the current path (/store) as the bookmark
     await panel.click('.overlay button:has-text("Use this path")');
@@ -116,7 +156,7 @@ test.describe.serial('bookmark flows', () => {
     await selectSendTo(panel, '__add_new__');
 
     // The "add new path" row should appear with a text input
-    await expect(panel.locator('input[placeholder="/remote/path"]')).toBeVisible({ timeout: 5_000 });
+    await waitForAddPathInput();
 
     // Browse and action buttons should also be visible
     await expect(panel.locator('button:has-text("Browse")')).toBeVisible();
@@ -135,7 +175,7 @@ test.describe.serial('bookmark flows', () => {
     await selectSendTo(panel, '__add_new__');
 
     const oneTimePath = '/store/one-time-test';
-    await panel.locator('input[placeholder="/remote/path"]').fill(oneTimePath);
+    await fillAddPathInput(oneTimePath);
 
     // Click "Use once" — sets the path as a temporary one-time selection
     await panel.click('button:has-text("Use once")');
@@ -164,9 +204,10 @@ test.describe.serial('bookmark flows', () => {
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
     await selectSendTo(panel, '__add_new__');
+    await waitForAddPathInput();
 
     // Click Browse — the overlay renders immediately in loading state
-    await panel.click('button:has-text("Browse")');
+    await clickAddPathBrowse();
 
     // The overlay should appear
     await panel.waitForSelector('.overlay', { timeout: 10_000 });
@@ -193,7 +234,8 @@ test.describe.serial('bookmark flows', () => {
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
     await selectSendTo(panel, '__add_new__');
-    await panel.click('button:has-text("Browse")');
+    await waitForAddPathInput();
+    await clickAddPathBrowse();
 
     await panel.waitForSelector('.overlay', { timeout: 10_000 });
 
@@ -213,15 +255,15 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — breadcrumb shows current path segment', async () => {
     const { panel } = session();
-    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
+    await closeOverlayIfOpen();
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
     await selectSendTo(panel, '__add_new__');
 
     // Pre-fill path input with /store so browse starts there
-    await panel.locator('input[placeholder="/remote/path"]').fill('/store');
-    await panel.click('button:has-text("Browse")');
+    await fillAddPathInput('/store');
+    await clickAddPathBrowse();
 
     await panel.waitForSelector('.overlay', { timeout: 10_000 });
     await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
@@ -241,56 +283,39 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — breadcrumb navigation: click segment navigates back', async () => {
     const { panel } = session();
-    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
+    await closeOverlayIfOpen();
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
     await selectSendTo(panel, '__add_new__');
 
     // Start at root so we can navigate into /store via the dir list
-    await panel.locator('input[placeholder="/remote/path"]').fill('/');
-    await panel.click('button:has-text("Browse")');
+    await fillAddPathInput('/');
+    await clickAddPathBrowse();
 
     await panel.waitForSelector('.overlay', { timeout: 10_000 });
     await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
 
-    // Check if 'store' directory appears; if so, click it to navigate in
     const storeEntry = panel.locator('.overlay .dir-list li:has-text("store")');
-    const hasStore = await storeEntry.count();
-    if (hasStore > 0) {
-      await storeEntry.click();
+    await expect(storeEntry).toBeVisible({ timeout: 10_000 });
+    await storeEntry.evaluate((entry: HTMLElement) => entry.click());
 
-      // Wait for the new listing to load
-      await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
+    // Wait for the new listing to load
+    await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
 
-      // Breadcrumb should now show "store"
-      const breadcrumbAfterNav = await panel.locator('.overlay .breadcrumb').textContent();
-      expect(breadcrumbAfterNav).toContain('store');
+    // Breadcrumb should now show "store"
+    const breadcrumbAfterNav = await panel.locator('.overlay .breadcrumb').textContent();
+    expect(breadcrumbAfterNav).toContain('store');
 
-      // Click the root "/" segment in the breadcrumb to navigate back
-      await panel.locator('.overlay .breadcrumb span').first().click();
+    // Click the root "/" segment in the breadcrumb to navigate back
+    await panel.locator('.overlay .breadcrumb span').first().click();
 
-      // Wait for new listing
-      await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
+    // Wait for new listing
+    await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
 
-      // Breadcrumb should be back to just "/"
-      const breadcrumbAfterBack = await panel.locator('.overlay .breadcrumb').textContent();
-      expect(breadcrumbAfterBack).not.toContain('store');
-    } else {
-      // /store is the only directory visible at root; navigate using path input instead
-      const pathInput = panel.locator('.overlay input[type="text"]').first();
-      await pathInput.fill('/store');
-      await panel.click('.overlay button:has-text("Go")');
-      await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
-
-      const breadcrumbDeep = await panel.locator('.overlay .breadcrumb').textContent();
-      // Breadcrumb format is like "/store" or "///store" — just check that 'store' appears
-      expect(breadcrumbDeep?.trim()).toMatch(/store/);
-
-      // Click root "/" in breadcrumb
-      await panel.locator('.overlay .breadcrumb span').first().click();
-      await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
-    }
+    // Breadcrumb should be back to just "/"
+    const breadcrumbAfterBack = await panel.locator('.overlay .breadcrumb').textContent();
+    expect(breadcrumbAfterBack).not.toContain('store');
 
     await panel.click('.overlay button:has-text("Cancel")');
   });
@@ -300,15 +325,15 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — pin as default updates preset default path', async () => {
     const { panel } = session();
-    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
+    await closeOverlayIfOpen();
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
     await selectSendTo(panel, '__add_new__');
 
     // Browse to /store
-    await panel.locator('input[placeholder="/remote/path"]').fill('/store');
-    await panel.click('button:has-text("Browse")');
+    await fillAddPathInput('/store');
+    await clickAddPathBrowse();
 
     await panel.waitForSelector('.overlay', { timeout: 10_000 });
     await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });
@@ -338,15 +363,15 @@ test.describe.serial('bookmark flows', () => {
   // -------------------------------------------------------------------------
   test('remote browse — bookmark from overlay saves to bookmarks list', async () => {
     const { panel } = session();
-    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => {});
+    await closeOverlayIfOpen();
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
     await selectSendTo(panel, '__add_new__');
 
     // Browse starting at /store
-    await panel.locator('input[placeholder="/remote/path"]').fill('/store');
-    await panel.click('button:has-text("Browse")');
+    await fillAddPathInput('/store');
+    await clickAddPathBrowse();
 
     await panel.waitForSelector('.overlay', { timeout: 10_000 });
     await panel.waitForSelector('.overlay .dir-list', { timeout: 30_000 });

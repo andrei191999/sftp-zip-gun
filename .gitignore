@@ -8,6 +8,7 @@ media/panel.css
 # Secrets & private configs
 .env
 .env.*
+!.env.example
 filezilla-small.xml
 filezilla*.xml
 !scripts/playwright/fixtures/*.xml
@@ -26,6 +27,10 @@ test-fixtures/
 # Test coverage output
 coverage/
 *.log
+
+# Playwright HTML report (parallel runs)
+playwright-report/
+test-results/
 
 # Local AI / agent / machine-specific state — never commit
 .agents/

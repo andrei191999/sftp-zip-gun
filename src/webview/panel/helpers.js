@@ -180,11 +180,13 @@ function reconcileListedFolderState(folderPath, files) {
   state.groups = reconciledGroups.groups;
   state.groupAnchors = reconciledGroups.groupAnchors;
 
-  Object.keys(state.groupCollapsed || {}).forEach(function(groupId) {
-    if (!reconciledGroups.validGroupIds.has(String(groupId))) {
-      delete state.groupCollapsed[groupId];
-    }
-  });
+  if (reconciledGroups.validGroupIds.size > 0) {
+    Object.keys(state.groupCollapsed || {}).forEach(function(groupId) {
+      if (!reconciledGroups.validGroupIds.has(String(groupId))) {
+        delete state.groupCollapsed[groupId];
+      }
+    });
+  }
 
   Object.keys(state.groupUploadStatuses || {}).forEach(function(groupId) {
     if (!reconciledGroups.validGroupIds.has(String(groupId))) {

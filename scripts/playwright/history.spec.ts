@@ -2,12 +2,13 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import { assertDockerRunning } from './helpers/docker-check';
-import { storeDir, listFiles, waitFor } from './helpers/sftp-verify';
+import { listFiles, makeRemoteTestDir, waitFor } from './helpers/sftp-verify';
 import {
   launchSharedVsCode,
   makeTestFolder,
   addPreset,
   selectPreset,
+  selectOneTimeRemotePath,
   selectFile,
   loadFolder,
   switchMode,
@@ -47,21 +48,22 @@ test.describe.serial('upload history', () => {
     return shared;
   }
 
-  test('successful upload creates history entry with account, mode, file, and timestamp', async () => {
+  test('successful upload creates history entry with account, mode, file, and timestamp', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'history');
     const localFile = path.join(folder, `e2e-hist-${Date.now()}.txt`);
+    const remote = makeRemoteTestDir(testInfo, 'pwuser', 'history');
     fs.writeFileSync(localFile, `e2e:history:${Date.now()}`);
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remote.remoteDir);
     await loadFolder(panel, folder);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, localFile);
     await panel.click('.btn-fire');
 
-    const dir  = storeDir('pwuser');
     const name = path.basename(localFile);
-    await waitFor(() => listFiles(dir).includes(name), `${name} not in pwuser/store`);
+    await waitFor(() => listFiles(remote.hostDir).includes(name), `${name} not in ${remote.hostDir}`);
     await waitForUploadIdle(panel);
 
     await panel.click('button:has-text("Upload History")');

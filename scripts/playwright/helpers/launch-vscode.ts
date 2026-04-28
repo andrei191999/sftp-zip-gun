@@ -1,22 +1,195 @@
-import { _electron as electron, ElectronApplication, Frame, Locator, Page } from '@playwright/test';
+import { _electron as electron, expect, ElectronApplication, Frame, Locator, Page } from '@playwright/test';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { installHighlight } from './visual-debug';
 
 type PanelTarget = Frame | Page;
 type UploadMode = 'pistol_file' | 'zip_canon' | 'zip_gun';
+type PanelView = 'manage' | 'transfer';
 
-/** Resolves the VS Code CLI executable path on Windows. */
+function isHeadedRun(): boolean {
+  return process.env.HEADED !== '0';
+}
+
+function getVsCodeLaunchArgs(extensionRoot: string, userDataDir: string, workspaceDir: string): string[] {
+  const args = [
+    `--extensionDevelopmentPath=${extensionRoot}`,
+    '--disable-updates',
+    '--no-sandbox',
+    '--disable-extension=googlecloudtools.cloudcode',
+    '--disable-extension=google.geminicodeassist',
+    '--disable-extension=ms-toolsai.jupyter',
+    '--disable-extension=GitHub.copilot',
+    '--disable-extension=GitHub.copilot-chat',
+    `--user-data-dir=${userDataDir}`,
+  ];
+
+  if (!isHeadedRun()) {
+    // Playwright's config-level `use.headless` does not affect `_electron.launch()`.
+    // Pass Chromium/VS Code launch switches explicitly so headless scripts do not
+    // still open visible VS Code windows.
+    args.push('--headless', '--disable-gpu');
+  }
+
+  args.push(workspaceDir);
+  return args;
+}
+
+export function isPageTarget(target: PanelTarget): target is Page {
+  return typeof (target as Page).frames === 'function';
+}
+
+export async function findWorkbenchWindow(
+  app: ElectronApplication,
+  preferred?: Page
+): Promise<Page> {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const candidates: Page[] = [];
+    const addCandidate = (candidate?: Page) => {
+      if (candidate && !candidates.includes(candidate)) {
+        candidates.push(candidate);
+      }
+    };
+
+    try {
+      addCandidate(await app.firstWindow());
+    } catch { /* app may be closing */ }
+
+    for (const window of app.windows()) {
+      addCandidate(window);
+    }
+    addCandidate(preferred);
+
+    for (const candidate of candidates) {
+      try {
+        if (candidate.isClosed()) continue;
+        const workbench = candidate.locator('.monaco-workbench').first();
+        if (await workbench.count() > 0) {
+          return candidate;
+        }
+      } catch { /* detached */ }
+    }
+
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  throw new Error('VS Code workbench window not found');
+}
+
+async function findVisiblePanelTarget(
+  app: ElectronApplication,
+  workbenchWindow: Page,
+  timeoutMs: number
+): Promise<PanelTarget | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // (a) separate windows
+    for (const w of app.windows()) {
+      if (w === workbenchWindow) continue;
+      try {
+        if (await isPanelTargetReady(w)) return w;
+      } catch { /* detached */ }
+    }
+    // (b) inline frames
+    for (const frame of workbenchWindow.frames()) {
+      try {
+        if (await isPanelTargetReady(frame)) return frame;
+      } catch { /* detached */ }
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  return undefined;
+}
+
+async function isPanelTargetReady(target: PanelTarget): Promise<boolean> {
+  const appRoot = target.locator('#app').first();
+  if ((await appRoot.count()) === 0) return false;
+  if (isHeadedRun() && !(await appRoot.isVisible())) return false;
+
+  const transferTab = target.locator('.view-tab:has-text("Transfer files")').first();
+  const manageTab = target.locator('.view-tab:has-text("Manage connections")').first();
+  return (await transferTab.count()) > 0 && (await manageTab.count()) > 0;
+}
+
+async function triggerOpenPanelFromStatusBar(workbenchWindow: Page, timeoutMs = 0): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const statusBarCommand = workbenchWindow
+      .getByRole('button', { name: /SFTP Zip Gun.*click to open panel/ })
+      .first();
+    try {
+      if (await statusBarCommand.count() > 0) {
+        await statusBarCommand.evaluate((button: HTMLElement) => button.click());
+        return true;
+      }
+    } catch {
+      // ignore and keep polling until the deadline
+    }
+
+    if (Date.now() >= deadline) {
+      return false;
+    }
+
+    await new Promise(r => setTimeout(r, 250));
+  }
+}
+
+async function triggerOpenPanelFromCommandPalette(workbenchWindow: Page): Promise<void> {
+  await workbenchWindow.keyboard.press('Control+Shift+P');
+  await workbenchWindow.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
+  await workbenchWindow.keyboard.type('Open Upload Panel');
+  await workbenchWindow.keyboard.press('Enter');
+}
+
+interface Tile { x: number; y: number; w: number; h: number }
+
+function getScreenSize(): { width: number; height: number } {
+  const envW = Number(process.env.SCREEN_W);
+  const envH = Number(process.env.SCREEN_H);
+  if (envW > 0 && envH > 0) return { width: envW, height: envH };
+
+  if (process.platform === 'win32') {
+    try {
+      const out = execFileSync(
+        'wmic',
+        ['path', 'Win32_VideoController', 'get',
+          'CurrentHorizontalResolution,CurrentVerticalResolution', '/format:value'],
+        { encoding: 'utf8' }
+      );
+      const w = Number(out.match(/CurrentHorizontalResolution=(\d+)/)?.[1]);
+      const h = Number(out.match(/CurrentVerticalResolution=(\d+)/)?.[1]);
+      if (w > 0 && h > 0) return { width: w, height: h };
+    } catch { /* fall through */ }
+  }
+  return { width: 1920, height: 1080 };
+}
+
+function computeTile(idx: number, count: number, screen: { width: number; height: number }): Tile | undefined {
+  if (count <= 1 || idx < 0 || idx >= count) return undefined;
+  const { width, height } = screen;
+  if (count === 2) {
+    const w = Math.floor(width / 2);
+    return { x: idx * w, y: 0, w, h: height };
+  }
+  if (count === 3) {
+    const w = Math.floor(width / 3);
+    return { x: idx * w, y: 0, w, h: height };
+  }
+  // 4+ → 2×2 grid (extra workers stack on slot 0..3)
+  const slot = idx % 4;
+  const col = slot % 2, row = Math.floor(slot / 2);
+  const w = Math.floor(width / 2), h = Math.floor(height / 2);
+  return { x: col * w, y: row * h, w, h };
+}
+
+/** Resolves the VS Code Electron executable path on Windows. */
 function resolveCodeExe(): string {
-  try {
-    // execFileSync with 'where' — no shell, no injection risk
-    const out = execFileSync('where', ['code'], { encoding: 'utf8' })
-      .trim()
-      .split(/\r?\n/)[0];
-    if (out && fs.existsSync(out)) return out;
-  } catch { /* fall through */ }
-
   const local = process.env.LOCALAPPDATA ?? '';
   const candidates = [
     path.join(local, 'Programs', 'Microsoft VS Code', 'Code.exe'),
@@ -25,8 +198,41 @@ function resolveCodeExe(): string {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
+
+  const normalizePathResult = (candidate: string): string | undefined => {
+    if (!candidate || !fs.existsSync(candidate)) return undefined;
+
+    const base = path.basename(candidate).toLowerCase();
+    if (base === 'code.exe' || base === 'code - insiders.exe') return candidate;
+
+    if (base === 'code' || base === 'code.cmd' || base === 'code.bat') {
+      const dir = path.dirname(candidate);
+      if (path.basename(dir).toLowerCase() === 'bin') {
+        const installRoot = path.dirname(dir);
+        const rootCandidates = [
+          path.join(installRoot, 'Code.exe'),
+          path.join(installRoot, 'Code - Insiders.exe'),
+        ];
+        return rootCandidates.find(c => fs.existsSync(c));
+      }
+    }
+
+    return candidate;
+  };
+
+  try {
+    // execFileSync with 'where' — no shell, no injection risk
+    const paths = execFileSync('where', ['code'], { encoding: 'utf8' })
+      .trim()
+      .split(/\r?\n/);
+    for (const candidate of paths) {
+      const normalized = normalizePathResult(candidate);
+      if (normalized) return normalized;
+    }
+  } catch { /* fall through */ }
+
   throw new Error(
-    'VS Code executable not found. Ensure VS Code is installed and `code` is on PATH.'
+    'VS Code Electron executable not found. Ensure VS Code is installed or `code` is on PATH.'
   );
 }
 
@@ -55,19 +261,34 @@ export async function launchVsCode(): Promise<{
     'extensions.ignoreRecommendations': true,
   }));
 
+  const args = getVsCodeLaunchArgs(extensionRoot, userDataDir, workspaceDir);
+
   const app = await electron.launch({
     executablePath: resolveCodeExe(),
-    args: [
-      `--extensionDevelopmentPath=${extensionRoot}`,
-      '--disable-updates',
-      '--no-sandbox',
-      '--disable-extension=googlecloudtools.cloudcode',
-      '--disable-extension=google.geminicodeassist',
-      '--disable-extension=ms-toolsai.jupyter',
-      `--user-data-dir=${userDataDir}`,
-      workspaceDir,
-    ],
+    args,
   });
+
+  const workerIndex = Number(process.env.TEST_PARALLEL_INDEX ?? '0');
+  const workerCount = Number(process.env.WORKERS ?? '1');
+  const tile = computeTile(workerIndex, workerCount, getScreenSize());
+  if (tile && isHeadedRun()) {
+    void app.firstWindow().then(async () => {
+      try {
+        await app.evaluate(({ BrowserWindow }, t) => {
+          const apply = () => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              try { win.setBounds({ x: t.x, y: t.y, width: t.w, height: t.h }); } catch { /* ignore */ }
+            }
+          };
+          apply();
+          // VS Code may re-position the window during early init; re-apply a few times.
+          setTimeout(apply, 500);
+          setTimeout(apply, 1500);
+          setTimeout(apply, 3000);
+        }, tile);
+      } catch { /* non-fatal */ }
+    }).catch(() => {});
+  }
 
   app.process().stderr?.once('data', (chunk: Buffer | string) => {
     if (chunk.toString().includes('Code is currently being updated')) {
@@ -98,14 +319,40 @@ export async function launchSharedVsCode(): Promise<{
 }> {
   const { app, cleanup, workspaceDir } = await launchVsCode();
   try {
-    const mainWindow = await app.firstWindow();
-    await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
+    const initialWindow = await app.firstWindow();
+    const mainWindow = await findWorkbenchWindow(app, initialWindow);
+    await expect(mainWindow.locator('.monaco-workbench').first()).toBeVisible({ timeout: 45_000 });
+    await hideAuxiliaryBar(mainWindow);
+    await installHighlight(mainWindow);
     const panel = await openPanelAndFindWebview(app, mainWindow);
-    return { app, cleanup, workspaceDir, mainWindow, panel };
+    await installHighlight(panel);
+    return { app, cleanup, workspaceDir, mainWindow: await findWorkbenchWindow(app, mainWindow), panel };
   } catch (error) {
     try { await app.close(); } catch { /* ignore */ }
     cleanup();
     throw error;
+  }
+}
+
+/**
+ * Closes VS Code's secondary (auxiliary) sidebar if it is currently visible,
+ * so the upload panel has full editor width — important when running multiple
+ * windows in parallel headed mode.
+ */
+async function hideAuxiliaryBar(window: Page): Promise<void> {
+  try {
+    const visible = await window.evaluate(() => {
+      const part = document.querySelector('.part.auxiliarybar') as HTMLElement | null;
+      if (!part) return false;
+      const style = part.ownerDocument.defaultView?.getComputedStyle(part);
+      if (!style) return false;
+      return style.display !== 'none' && style.visibility !== 'hidden' && part.offsetWidth > 0;
+    });
+    if (visible) {
+      await window.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+B' : 'Control+Alt+B');
+    }
+  } catch {
+    // not fatal; suite proceeds even if the aux bar can't be queried
   }
 }
 
@@ -123,7 +370,9 @@ export async function switchMode(panel: PanelTarget, mode: UploadMode): Promise<
     zip_canon: '.mode-half-zip-canon',
     zip_gun: '.mode-half-zip-gun',
   };
-  await panel.click(selectorByMode[mode]);
+  const modeButton = panel.locator(selectorByMode[mode]);
+  await modeButton.click();
+  await expect(modeButton).toHaveClass(/active/, { timeout: 5_000 });
 }
 
 /** Waits until the panel is ready to start another upload. */
@@ -144,41 +393,75 @@ export async function openPanelAndFindWebview(
   app: ElectronApplication,
   mainWindow: Page
 ): Promise<Frame | Page> {
+  const workbenchWindow = await findWorkbenchWindow(app, mainWindow);
+
   // Wait for VS Code to settle before opening the command palette so
   // startup notifications don't steal focus from the palette input.
-  await mainWindow.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-  await new Promise(r => setTimeout(r, 1_500));
+  await workbenchWindow.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
+  await new Promise(r => setTimeout(r, isHeadedRun() ? 1_500 : 3_000));
 
-  // Use the command palette — bypasses the `when: resourceScheme == file`
-  // guard on the keyboard shortcut, which blocks when no file editor is focused.
-  await mainWindow.keyboard.press('Control+Shift+P');
-  await mainWindow.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-  await mainWindow.keyboard.type('Open Upload Panel');
-  await mainWindow.keyboard.press('Enter');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const statusTriggered = await triggerOpenPanelFromStatusBar(
+      workbenchWindow,
+      attempt === 0 ? (isHeadedRun() ? 5_000 : 12_000) : (isHeadedRun() ? 2_000 : 6_000)
+    );
+    const statusPanel = await findVisiblePanelTarget(
+      app,
+      workbenchWindow,
+      statusTriggered ? 12_000 : 2_000
+    );
+    if (statusPanel) return statusPanel;
 
-  // VS Code may render the webview as:
-  //   (a) a new Electron BrowserWindow / <webview> WebContents → check app.windows()
-  //   (b) an <iframe> inside the main window               → check mainWindow.frames()
-  // Poll both until #app is found.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    // (a) separate windows
-    for (const w of app.windows()) {
-      if (w === mainWindow) continue;
-      try {
-        if ((await w.locator('#app').count()) > 0) return w;
-      } catch { /* detached */ }
+    try {
+      await triggerOpenPanelFromCommandPalette(workbenchWindow);
+      const commandPanel = await findVisiblePanelTarget(
+        app,
+        workbenchWindow,
+        isHeadedRun() ? 20_000 : 30_000 + attempt * 15_000
+      );
+      if (commandPanel) return commandPanel;
+    } catch { /* retry status bar below */ }
+
+    if (await triggerOpenPanelFromStatusBar(workbenchWindow, isHeadedRun() ? 1_500 : 4_000)) {
+      const retryPanel = await findVisiblePanelTarget(app, workbenchWindow, 12_000 + attempt * 5_000);
+      if (retryPanel) return retryPanel;
     }
-    // (b) inline frames
-    for (const frame of mainWindow.frames()) {
-      try {
-        if ((await frame.locator('#app').count()) > 0) return frame;
-      } catch { /* detached */ }
+
+    if (attempt === 0) {
+      await new Promise(r => setTimeout(r, isHeadedRun() ? 1_000 : 2_500));
     }
-    await new Promise(r => setTimeout(r, 300));
   }
 
-  throw new Error('SFTP Zip Gun webview (#app) not found within 30s');
+  throw new Error('SFTP Zip Gun webview (ready panel with #app and tabs) not found within launch timeout');
+}
+
+export async function closeAndReopenPanel(
+  app: ElectronApplication,
+  mainWindow: Page
+): Promise<{ mainWindow: Page; panel: PanelTarget }> {
+  let workbenchWindow: Page | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    workbenchWindow = await findWorkbenchWindow(app, attempt === 0 ? mainWindow : undefined);
+    try {
+      await workbenchWindow.keyboard.press('Control+W');
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/Target page, context or browser has been closed/.test(message) || attempt === 2) {
+        throw error;
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  if (!workbenchWindow) {
+    throw new Error('VS Code workbench window not found before panel close');
+  }
+  await new Promise(r => setTimeout(r, 800));
+
+  const currentWorkbench = await findWorkbenchWindow(app, workbenchWindow);
+  const panel = await openPanelAndFindWebview(app, currentWorkbench);
+  return { mainWindow: await findWorkbenchWindow(app, currentWorkbench), panel };
 }
 
 /**
@@ -198,35 +481,76 @@ export async function addPreset(
     password?: string;
   }
 ): Promise<void> {
-  await panel.click('.view-tab:has-text("Manage connections")');
-  await panel.click('button:has-text("+ Add Account")');
+  await openManageTab(panel);
+  await panel.locator('button:has-text("+ Add Account")').evaluate((button: HTMLButtonElement) => button.click());
 
-  await panel.locator('.row:has(label:text-is("Name")) input').fill(preset.name);
-  await panel.locator('.row:has(label:text-is("Host")) input').fill(preset.host);
-  await panel.locator('.row:has(label:text-is("Port")) input').fill(String(preset.port));
-  await panel.locator('.row:has(label:text-is("Username")) input').fill(preset.username);
-  await panel.locator('.row:has(label:text-is("Default path")) input').fill(preset.remoteDir);
+  const form = panel.locator('#preset-form-section');
+  await form.locator('input[placeholder="My Server"]').fill(preset.name);
+  await form.locator('input[placeholder="sftp.example.com"]').fill(preset.host);
+  await form.locator('input[type="number"]').fill(String(preset.port));
+  await form.locator('input[placeholder="username"]').fill(preset.username);
+  await form.locator('input[placeholder="/uploads"]').fill(preset.remoteDir);
 
   if (preset.authType === 'key') {
-    await panel.click('input[type="radio"][value="key"]');
-    await panel.locator('#f-auth-fields input[type="text"]').fill(preset.keyPath ?? '');
+    await form.locator('input[type="radio"][value="key"]').evaluate((input: HTMLInputElement) => {
+      input.checked = true;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const keyInput = form.locator('#f-auth-fields input[placeholder="/home/user/.ssh/id_rsa"]');
+    await expect(async () => {
+      await keyInput.waitFor({ state: 'visible', timeout: 2_000 });
+      await keyInput.fill(preset.keyPath ?? '');
+      await expect(keyInput).toHaveValue(preset.keyPath ?? '', { timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   } else {
-    await panel.click('input[type="radio"][value="password"]');
+    await form.locator('input[type="radio"][value="password"]').evaluate((input: HTMLInputElement) => {
+      input.checked = true;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     if (preset.password) {
-      await panel.locator('#f-auth-fields input[type="password"]').fill(preset.password);
+      const passwordInput = form.locator('#f-auth-fields input[type="password"]');
+      await expect(async () => {
+        await passwordInput.waitFor({ state: 'visible', timeout: 2_000 });
+        await passwordInput.fill(preset.password ?? '');
+        await expect(passwordInput).toHaveValue(preset.password ?? '', { timeout: 2_000 });
+      }).toPass({ timeout: 15_000 });
     }
   }
 
-  await panel.click('#preset-form-section button:has-text("Save")');
-  await panel.waitForSelector(`.preset-card:has-text("${preset.name}")`, { timeout: 30_000 });
-
-  // Return to Transfer tab
-  await panel.click('.view-tab:has-text("Transfer files")');
+  await expect(async () => {
+    const saveButton = form.locator('button:text-is("Save")');
+    await saveButton.waitFor({ state: 'visible', timeout: 2_000 });
+    await saveButton.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(form).toBeHidden({ timeout: 3_000 });
+  }).toPass({ timeout: 45_000 });
+  await openTransferTab(panel);
+  await expect(panel.locator(`#preset-select option[value="${preset.name}"]`)).toHaveCount(1, { timeout: 10_000 });
 }
 
 /** Selects a preset from the Account dropdown. */
 export async function selectPreset(panel: PanelTarget, presetName: string): Promise<void> {
-  await panel.selectOption('#preset-select', { value: presetName });
+  const deadline = Date.now() + 30_000;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const select = panel.locator('#preset-select');
+      await select.waitFor({ state: 'visible', timeout: 5_000 });
+      await select.evaluate((element: HTMLSelectElement, value) => {
+        element.value = value;
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      }, presetName);
+      await expect(select).toHaveValue(presetName, { timeout: 5_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Timed out selecting preset "${presetName}"`);
 }
 
 /**
@@ -273,24 +597,36 @@ export async function selectFile(panel: PanelTarget, absPath: string): Promise<v
   }
 }
 
-/** Clicks the "Session Logs" tab button. */
+/** Opens the "Session Logs" tab. No-op if already active (clicking active tab would close it). */
 export async function openLogTab(panel: PanelTarget): Promise<void> {
-  await panel.click('button:has-text("Session Logs")');
+  const logsBtn = panel.locator('button:has-text("Session Logs")');
+  const isActive = await logsBtn.evaluate(el => el.classList.contains('active'));
+  if (!isActive) {
+    await logsBtn.click();
+    await expect(logsBtn).toHaveClass(/active/, { timeout: 5_000 });
+  }
+  await panel.locator('.log-section-box:has(.log-box) .log-filter-row').waitFor({ timeout: 5_000 });
 }
 
-/** Clicks the "Upload History" tab button. Only navigates if tab is not already active. */
+/** Opens the "Upload History" tab. No-op if already active (clicking active tab would close it). */
 export async function openHistoryTab(panel: PanelTarget): Promise<void> {
-  // Only navigate to history tab if not already there (clicking active tab toggles it off)
-  const allBtn = panel.locator('button:text-is("All")');
-  if (await allBtn.count() === 0) {
-    await panel.click('button:has-text("Upload History")');
-    await allBtn.waitFor({ timeout: 5_000 });
+  const histBtn = panel.locator('button:has-text("Upload History")');
+  const isActive = await histBtn.evaluate(el => el.classList.contains('active'));
+  if (!isActive) {
+    await histBtn.click();
+    await expect(histBtn).toHaveClass(/active/, { timeout: 5_000 });
   }
+  await panel.locator('.log-history-section').waitFor({ timeout: 5_000 });
+  await panel.locator('.log-section-box:has(.log-history-section) .log-filter-row').waitFor({ timeout: 5_000 });
 }
 
 /** Returns a locator for all .history-entry elements. */
 export function getHistoryEntries(panel: PanelTarget): Locator {
   return panel.locator('.history-entry');
+}
+
+async function clickButtonByDom(locator: Locator): Promise<void> {
+  await locator.evaluate((button: HTMLElement) => button.click());
 }
 
 /** Sets history result + mode filters. Pass 'all' to reset each. */
@@ -304,15 +640,25 @@ export async function setHistoryFilter(
     success: '✓ Success',
     error: '✗ Errors',
   };
-  await panel.click(`button:text-is("${resultLabel[result]}")`);
+  const filterBar = panel.locator('.log-section-box:has(.log-history-section) .log-filter-row');
+  await filterBar.waitFor({ timeout: 5_000 });
+  const resultButton = filterBar.locator(`button:text-is("${resultLabel[result]}")`);
+  if (!/\bactive\b/.test(await resultButton.getAttribute('class') ?? '')) {
+    await clickButtonByDom(resultButton);
+  }
 
   // Mode filter buttons only render when histModes.length > 1
-  const modeBar = await panel.locator('.breadcrumb').count();
-  if (modeBar > 0) {
+  const allModesBtn = filterBar.locator('button:text-is("All modes")');
+  if (await allModesBtn.count() > 0) {
     if (mode === 'all') {
-      await panel.click('button:has-text("All modes")');
+      if (!/\bactive\b/.test(await allModesBtn.getAttribute('class') ?? '')) {
+        await clickButtonByDom(allModesBtn);
+      }
     } else {
-      await panel.click(`button:has-text("${mode}")`);
+      const modeButton = filterBar.locator(`button:text-is("${mode}")`);
+      if (!/\bactive\b/.test(await modeButton.getAttribute('class') ?? '')) {
+        await clickButtonByDom(modeButton);
+      }
     }
   }
 }
@@ -336,7 +682,29 @@ export async function setLogCategoryFilter(
   panel: PanelTarget,
   category: 'upload' | 'conn' | 'import' | 'accounts' | 'sys' | 'all'
 ): Promise<void> {
-  await panel.click(`button:has-text("${category}")`);
+  const filterBar = panel.locator('.log-section-box:has(.log-box) .log-filter-row');
+  await filterBar.waitFor({ timeout: 5_000 });
+  const allBtn = filterBar.locator('button:text-is("All")');
+  if (category === 'all') {
+    if (!/\bactive\b/.test(await allBtn.getAttribute('class') ?? '')) {
+      await allBtn.click();
+    }
+    return;
+  }
+
+  if (/\bactive\b/.test(await allBtn.getAttribute('class') ?? '')) {
+    await allBtn.click();
+  }
+
+  for (const cat of ['upload', 'conn', 'import', 'accounts', 'sys']) {
+    const btn = filterBar.locator(`button:text-is("${cat}")`);
+    const isActive = /\bactive\b/.test(await btn.getAttribute('class') ?? '');
+    if (cat === category && !isActive) {
+      await btn.click();
+    } else if (cat !== category && isActive) {
+      await btn.click();
+    }
+  }
 }
 
 /** Selects an option in the #send-to-select dropdown. */
@@ -344,12 +712,39 @@ export async function selectSendTo(panel: PanelTarget, value: string): Promise<v
   await panel.selectOption('#send-to-select', { value });
 }
 
+/**
+ * Selects a one-time remote path in the Transfer tab.
+ * Leaves bookmark helpers and the default /store flow unchanged.
+ */
+export async function selectOneTimeRemotePath(panel: PanelTarget, remoteDir: string): Promise<void> {
+  await openTransferTab(panel);
+  const select = panel.locator('#send-to-select');
+  await select.selectOption({ value: '__add_new__' });
+
+  const remotePathInput = panel.locator('input[placeholder="/remote/path"]');
+  await remotePathInput.waitFor({ state: 'visible', timeout: 10_000 });
+  await remotePathInput.fill(remoteDir);
+
+  await panel.locator('button:text-is("Use once")').click();
+  await expect(select).toHaveValue(remoteDir, { timeout: 5_000 });
+}
+
+async function openViewTab(panel: PanelTarget, label: string, anchorSelector: string): Promise<void> {
+  const tab = panel.locator(`.view-tab:has-text("${label}")`);
+  await tab.waitFor({ state: 'visible', timeout: 10_000 });
+  if (!await tab.evaluate(el => el.classList.contains('active'))) {
+    await tab.evaluate((button: HTMLElement) => button.click());
+  }
+  await expect(tab).toHaveClass(/active/, { timeout: 10_000 });
+  await panel.locator(anchorSelector).waitFor({ state: 'visible', timeout: 10_000 });
+}
+
 /** Clicks the "Manage connections" view tab. */
 export async function openManageTab(panel: PanelTarget): Promise<void> {
-  await panel.click('.view-tab:has-text("Manage connections")');
+  await openViewTab(panel, 'Manage connections', 'button:has-text("+ Add Account")');
 }
 
 /** Clicks the "Transfer files" view tab. */
 export async function openTransferTab(panel: PanelTarget): Promise<void> {
-  await panel.click('.view-tab:has-text("Transfer files")');
+  await openViewTab(panel, 'Transfer files', '#preset-select');
 }

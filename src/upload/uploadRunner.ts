@@ -141,6 +141,32 @@ function buildHistoryEntry(args: {
   };
 }
 
+async function cleanupPartialRemoteFile(
+  transport: UploadRunnerTransport,
+  connectOptions: unknown,
+  remotePath: string
+): Promise<void> {
+  try {
+    await transport.deleteFile(remotePath);
+    return;
+  } catch {
+    // forceAbort() destroys the active SFTP socket, so cleanup may need a fresh connection.
+  }
+
+  try {
+    await transport.disconnect();
+  } catch {
+    // Continue with reconnect; final disconnect still runs in the caller.
+  }
+
+  try {
+    await transport.connect(connectOptions);
+    await transport.deleteFile(remotePath);
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
 async function persistSuccessfulUpload(
   stateManager: UploadRunnerStateManager,
   entry: HistoryEntry,
@@ -272,11 +298,7 @@ export async function runUploadRunner({
   } catch (error: unknown) {
     if (isAbortError(error) || transport.isAborted) {
       if (currentRemotePath && !preset.readOnly) {
-        try {
-          await transport.deleteFile(currentRemotePath);
-        } catch {
-          // Best-effort cleanup only.
-        }
+        await cleanupPartialRemoteFile(transport, connectOptions, currentRemotePath);
       }
 
       return {

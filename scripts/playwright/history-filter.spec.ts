@@ -2,12 +2,13 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import { assertDockerRunning } from './helpers/docker-check';
-import { storeDir, listFiles, waitFor } from './helpers/sftp-verify';
+import { listFiles, makeRemoteTestDir, waitFor } from './helpers/sftp-verify';
 import {
   launchSharedVsCode,
   makeTestFolder,
   addPreset,
   selectPreset,
+  selectOneTimeRemotePath,
   selectFile,
   loadFolder,
   switchMode,
@@ -18,6 +19,7 @@ import {
   getHistoryEntries,
   injectLog,
   setLogCategoryFilter,
+  openTransferTab,
 } from './helpers/launch-vscode';
 
 const PW_PRESET = {
@@ -80,21 +82,22 @@ test.describe.serial('history filters and log tab', () => {
   // ---------------------------------------------------------------------------
   // Test 2: successful upload creates entry with success badge
   // ---------------------------------------------------------------------------
-  test('history — successful upload creates entry with success badge', async () => {
+  test('history — successful upload creates entry with success badge', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'hf-success');
     const localFile = path.join(folder, `hf-success-${Date.now()}.txt`);
+    const remote = makeRemoteTestDir(testInfo, 'pwuser', 'hf-success');
     fs.writeFileSync(localFile, `hf:success:${Date.now()}`);
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remote.remoteDir);
     await loadFolder(panel, folder);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, localFile);
     await panel.click('.btn-fire');
 
-    const dir  = storeDir('pwuser');
     const name = path.basename(localFile);
-    await waitFor(() => listFiles(dir).includes(name), `${name} not in pwuser/store`);
+    await waitFor(() => listFiles(remote.hostDir).includes(name), `${name} not in ${remote.hostDir}`);
     await waitForUploadIdle(panel);
 
     await openHistoryTab(panel);
@@ -110,38 +113,42 @@ test.describe.serial('history filters and log tab', () => {
   // ---------------------------------------------------------------------------
   // Test 3: newest entry appears at top
   // ---------------------------------------------------------------------------
-  test('history — newest entry appears at top', async () => {
+  test('history — newest entry appears at top', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
 
     // Upload file A
     const folderA = makeTestFolder(workspaceDir, 'hf-order-a');
     const fileA = path.join(folderA, `hf-order-a-${Date.now()}.txt`);
+    const remoteA = makeRemoteTestDir(testInfo, 'pwuser', 'hf-order-a');
     fs.writeFileSync(fileA, `hf:order-a:${Date.now()}`);
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remoteA.remoteDir);
     await loadFolder(panel, folderA);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, fileA);
     await panel.click('.btn-fire');
     await waitFor(
-      () => listFiles(storeDir('pwuser')).includes(path.basename(fileA)),
-      `${path.basename(fileA)} not in pwuser/store`
+      () => listFiles(remoteA.hostDir).includes(path.basename(fileA)),
+      `${path.basename(fileA)} not in ${remoteA.hostDir}`
     );
     await waitForUploadIdle(panel);
 
     // Upload file B
     const folderB = makeTestFolder(workspaceDir, 'hf-order-b');
     const fileB = path.join(folderB, `hf-order-b-${Date.now()}.txt`);
+    const remoteB = makeRemoteTestDir(testInfo, 'pwuser', 'hf-order-b');
     fs.writeFileSync(fileB, `hf:order-b:${Date.now()}`);
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remoteB.remoteDir);
     await loadFolder(panel, folderB);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, fileB);
     await panel.click('.btn-fire');
     await waitFor(
-      () => listFiles(storeDir('pwuser')).includes(path.basename(fileB)),
-      `${path.basename(fileB)} not in pwuser/store`
+      () => listFiles(remoteB.hostDir).includes(path.basename(fileB)),
+      `${path.basename(fileB)} not in ${remoteB.hostDir}`
     );
     await waitForUploadIdle(panel);
 
@@ -159,22 +166,24 @@ test.describe.serial('history filters and log tab', () => {
   // Test 4: result filter Success hides error entries
   // Creates 1 success + 1 error entry for tests 4, 5, and 6.
   // ---------------------------------------------------------------------------
-  test('history — result filter Success hides error entries', async () => {
+  test('history — result filter Success hides error entries', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
 
     // 1 success entry
     const folder = makeTestFolder(workspaceDir, 'hf-filter-ok');
     const localFile = path.join(folder, `hf-fok-${Date.now()}.txt`);
+    const remote = makeRemoteTestDir(testInfo, 'pwuser', 'hf-filter-ok');
     fs.writeFileSync(localFile, `hf:filter-ok:${Date.now()}`);
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remote.remoteDir);
     await loadFolder(panel, folder);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, localFile);
     await panel.click('.btn-fire');
     await waitFor(
-      () => listFiles(storeDir('pwuser')).includes(path.basename(localFile)),
-      `${path.basename(localFile)} not in pwuser/store`
+      () => listFiles(remote.hostDir).includes(path.basename(localFile)),
+      `${path.basename(localFile)} not in ${remote.hostDir}`
     );
     await waitForUploadIdle(panel);
 
@@ -234,27 +243,30 @@ test.describe.serial('history filters and log tab', () => {
   // Test 7: mode filter canon hides pistol entry
   // Requires both pistol and canon entries in history so the mode bar appears.
   // ---------------------------------------------------------------------------
-  test('history — mode filter canon hides pistol entry', async () => {
+  test('history — mode filter canon hides pistol entry', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
 
     // pistol_file entry
     const folderP = makeTestFolder(workspaceDir, 'hf-mode-pistol');
     const fileP = path.join(folderP, `hf-mode-pistol-${Date.now()}.txt`);
+    const remoteP = makeRemoteTestDir(testInfo, 'pwuser', 'hf-mode-pistol');
     fs.writeFileSync(fileP, `hf:mode-pistol:${Date.now()}`);
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remoteP.remoteDir);
     await loadFolder(panel, folderP);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, fileP);
     await panel.click('.btn-fire');
     await waitFor(
-      () => listFiles(storeDir('pwuser')).includes(path.basename(fileP)),
-      `${path.basename(fileP)} not in pwuser/store`
+      () => listFiles(remoteP.hostDir).includes(path.basename(fileP)),
+      `${path.basename(fileP)} not in ${remoteP.hostDir}`
     );
     await waitForUploadIdle(panel);
 
     // zip_canon entry
     const folderC = makeTestFolder(workspaceDir, 'hf-mode-canon');
+    const remoteC = makeRemoteTestDir(testInfo, 'pwuser', 'hf-mode-canon');
     const canonFiles = [1, 2, 3].map(i => {
       const p = path.join(folderC, `hf-canon-${Date.now()}-${i}.txt`);
       fs.writeFileSync(p, `hf:canon:${i}:${Date.now()}`);
@@ -262,15 +274,16 @@ test.describe.serial('history filters and log tab', () => {
     });
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remoteC.remoteDir);
     await loadFolder(panel, folderC);
     await switchMode(panel, 'zip_canon');
     for (const f of canonFiles) { await selectFile(panel, f); }
 
-    const dirBefore = new Set(listFiles(storeDir('pwuser')));
+    const dirBefore = new Set(listFiles(remoteC.hostDir));
     await panel.click('.btn-fire');
     await waitFor(
-      () => listFiles(storeDir('pwuser')).some(n => n.endsWith('.zip') && !dirBefore.has(n)),
-      'canon zip not in pwuser/store'
+      () => listFiles(remoteC.hostDir).some(n => n.endsWith('.zip') && !dirBefore.has(n)),
+      `canon zip not in ${remoteC.hostDir}`
     );
     await waitForUploadIdle(panel);
 
@@ -285,9 +298,7 @@ test.describe.serial('history filters and log tab', () => {
     await setHistoryFilter(panel, 'all', 'canon');
 
     // No pistol-mode entries should be visible
-    const pistolEntries = panel.locator('.history-entry .hentry-mode-pistol_file');
-    const pistolCount = await pistolEntries.count();
-    expect(pistolCount).toBe(0);
+    await expect(panel.locator('.history-entry .hentry-mode-pistol_file')).toHaveCount(0, { timeout: 5_000 });
   });
 
   // ---------------------------------------------------------------------------
@@ -345,9 +356,8 @@ test.describe.serial('history filters and log tab', () => {
     const text = await panel.locator('.history-empty').textContent();
     expect(text?.trim()).toBe('No matching entries.');
 
-    // Restore actual history from host — trigger a dummy upload or reload
-    // by switching away from history tab so subsequent tests see real state
-    await panel.click('button:has-text("Transfer files")');
+    // Switch away from history tab so subsequent tests start from the transfer view.
+    await openTransferTab(panel);
   });
 
   // ---------------------------------------------------------------------------

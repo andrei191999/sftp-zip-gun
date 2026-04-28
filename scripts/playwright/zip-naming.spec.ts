@@ -233,6 +233,7 @@ test.describe.serial('zip naming UI', () => {
     await switchMode(panel, 'zip_gun');
 
     // Create group 1 and assign the first file
+    await selectFile(panel, files[0]);
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
 
@@ -266,6 +267,7 @@ test.describe.serial('zip naming UI', () => {
     await switchMode(panel, 'zip_gun');
 
     // Create group 1
+    await selectFile(panel, files[0]);
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
 
@@ -292,6 +294,7 @@ test.describe.serial('zip naming UI', () => {
     await switchMode(panel, 'zip_gun');
 
     // Create group 1 and assign a file so the group has content
+    await selectFile(panel, files[0]);
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
 
@@ -318,6 +321,7 @@ test.describe.serial('zip naming UI', () => {
     await switchMode(panel, 'zip_gun');
 
     // Create group 1 and assign a file
+    await selectFile(panel, files[0]);
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
 
@@ -420,9 +424,9 @@ test.describe.serial('zip naming UI', () => {
     await loadFolder(panel, folder);
     await switchMode(panel, 'zip_canon');
 
-    // In zip_canon, pin icons have class pin-icon (not hidden)
-    // Count span.pin-icon elements in the file table
-    await panel.waitForSelector('.pin-icon', { timeout: 5_000 });
+    // In zip_canon, pin icons are rendered and become visible on row hover.
+    await panel.locator('tr[data-filepath]').first().hover();
+    await expect(panel.locator('#file-list .pin-icon').first()).toBeVisible({ timeout: 5_000 });
     const count = await panel.locator('.pin-icon').count();
     expect(count).toBeGreaterThan(0);
   });
@@ -437,6 +441,7 @@ test.describe.serial('zip naming UI', () => {
     await switchMode(panel, 'zip_gun');
 
     // Create a group and assign a file so pin cells are rendered
+    await selectFile(panel, files[0]);
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
 
@@ -469,6 +474,7 @@ test.describe.serial('zip naming UI', () => {
     await switchMode(panel, 'zip_gun');
 
     // Create group and assign a file
+    await selectFile(panel, files[0]);
     await panel.click('button:has-text("\u2192 New Group")');
     await panel.waitForSelector('tr.group-header-row', { timeout: 5_000 });
 
@@ -502,10 +508,12 @@ test.describe.serial('zip naming UI', () => {
 
     // Initially no pin should be active (no anchorFile set by loadFolder reset)
     // Click the pin for the second file
+    await panel.locator(`tr[data-filepath="${norm(files[1])}"]`).waitFor({ timeout: 5_000 });
+    await panel.locator(`tr[data-filepath="${norm(files[1])}"]`).hover();
     const pin2 = panel.locator(
       `tr[data-filepath="${norm(files[1])}"] .pin-icon, tr[data-filepath="${files[1]}"] .pin-icon`
     );
-    await pin2.first().waitFor({ timeout: 5_000 });
+    await expect(pin2.first()).toBeVisible({ timeout: 5_000 });
     await pin2.first().click();
 
     // After click, the pin for file[1] should have class pin-icon-active

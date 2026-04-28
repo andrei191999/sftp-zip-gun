@@ -8,9 +8,8 @@ import {
   selectPreset,
   loadFolder,
   switchMode,
-  openPanelAndFindWebview,
+  closeAndReopenPanel,
 } from './helpers/launch-vscode';
-import type { Frame, Page } from '@playwright/test';
 
 const PRESET = {
   name: 'StateTest',
@@ -46,6 +45,11 @@ test.describe.serial('ui-state', () => {
     return shared;
   }
 
+  function syncSession(next: Pick<SharedSession, 'mainWindow' | 'panel'>): void {
+    shared!.mainWindow = next.mainWindow;
+    shared!.panel = next.panel;
+  }
+
   /** Helper: create N .txt files in a fresh test folder and return the folder path. */
   function makeFilledFolder(workspaceDir: string, label: string, names: string[]): string {
     const folder = makeTestFolder(workspaceDir, label);
@@ -60,21 +64,18 @@ test.describe.serial('ui-state', () => {
   // ---------------------------------------------------------------------------
 
   test('mode persists after panel close/reopen', async () => {
-    const { app, mainWindow, workspaceDir } = session();
+    const { app, workspaceDir } = session();
     let { panel } = session();
 
     const folder = makeFilledFolder(workspaceDir, 'persist-mode', ['a.txt', 'b.txt']);
     await selectPreset(panel, PRESET.name);
     await loadFolder(panel, folder);
     await switchMode(panel, 'zip_canon');
+    await new Promise(r => setTimeout(r, 300));
 
-    // Close the panel tab
-    await mainWindow.keyboard.press('Control+W');
-    await new Promise(r => setTimeout(r, 800));
-
-    // Reopen
-    panel = await openPanelAndFindWebview(app, mainWindow);
-    shared!.panel = panel;  // keep shared reference in sync
+    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    syncSession(reopened);
+    panel = reopened.panel;
 
     // Mode is restored from vscode.setState — wait for mode buttons to render
     // (they're only in the Transfer tab, not Manage, so ensure Transfer is active)
@@ -84,19 +85,15 @@ test.describe.serial('ui-state', () => {
   });
 
   test('last preset persists after panel close/reopen', async () => {
-    const { app, mainWindow, workspaceDir } = session();
+    const { app } = session();
     let { panel } = session();
 
     // Ensure the preset is selected before closing
     await selectPreset(panel, PRESET.name);
 
-    // Close the panel tab
-    await mainWindow.keyboard.press('Control+W');
-    await new Promise(r => setTimeout(r, 800));
-
-    // Reopen
-    panel = await openPanelAndFindWebview(app, mainWindow);
-    shared!.panel = panel;
+    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    syncSession(reopened);
+    panel = reopened.panel;
 
     // #preset-select value should be the preset name
     const value = await panel.locator('#preset-select').inputValue();
@@ -104,7 +101,7 @@ test.describe.serial('ui-state', () => {
   });
 
   test('section collapse persists', async () => {
-    const { app, mainWindow, workspaceDir } = session();
+    const { app, workspaceDir } = session();
     let { panel } = session();
 
     const folder = makeFilledFolder(workspaceDir, 'persist-collapse', ['x.txt', 'y.txt']);
@@ -117,18 +114,16 @@ test.describe.serial('ui-state', () => {
     await toggleBtn.click();
     // Wait for DOM to update (section-body should disappear)
     await panel.waitForSelector('#section-files .section-body', { state: 'detached', timeout: 5_000 });
+    await new Promise(r => setTimeout(r, 300));
 
-    // Close and reopen panel
-    await mainWindow.keyboard.press('Control+W');
-    await new Promise(r => setTimeout(r, 800));
-    panel = await openPanelAndFindWebview(app, mainWindow);
-    shared!.panel = panel;
+    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    syncSession(reopened);
+    panel = reopened.panel;
 
     await selectPreset(panel, PRESET.name);
 
     // Section body should still be collapsed (not in DOM)
-    const bodyCount = await panel.locator('#section-files .section-body').count();
-    expect(bodyCount).toBe(0);
+    await expect(panel.locator('#section-files .section-body')).toHaveCount(0, { timeout: 10_000 });
 
     // Restore expanded state so subsequent tests find tr[data-filepath] rows
     const sectionToggle = panel.locator('#section-files .section-header button.section-toggle');
@@ -392,7 +387,7 @@ test.describe.serial('ui-state', () => {
   // ---------------------------------------------------------------------------
 
   test('groupCollapsed persists after collapse', async () => {
-    const { app, mainWindow, workspaceDir } = session();
+    const { app, workspaceDir } = session();
     let { panel } = session();
 
     const folder = makeFilledFolder(workspaceDir, 'grp-collapsed', ['gc1.txt', 'gc2.txt']);
@@ -417,12 +412,11 @@ test.describe.serial('ui-state', () => {
       if (!sibling) { return true; }
       return !sibling.classList.contains('group-color-1') && !sibling.hasAttribute('data-groupid');
     }, { timeout: 5_000 });
+    await new Promise(r => setTimeout(r, 300));
 
-    // Close and reopen panel
-    await mainWindow.keyboard.press('Control+W');
-    await new Promise(r => setTimeout(r, 800));
-    panel = await openPanelAndFindWebview(app, mainWindow);
-    shared!.panel = panel;
+    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    syncSession(reopened);
+    panel = reopened.panel;
 
     // Reload folder
     await selectPreset(panel, PRESET.name);
@@ -439,9 +433,15 @@ test.describe.serial('ui-state', () => {
     await panel.locator(`tr[data-filepath="${norm('gc1.txt')}"] select.group-select`).selectOption('__new__');
     await panel.waitForSelector('tr.group-header-row[data-groupid="1"]', { timeout: 5_000 });
 
-    // The group header caret should show the collapsed glyph (▸ = U+25B8)
-    const caretText = await panel.locator('tr.group-header-row[data-groupid="1"] .group-header-content span').first().textContent();
-    expect(caretText?.trim().startsWith('\u25b8')).toBe(true);
+    // The group header caret should show the collapsed glyph (▸ = U+25B8).
+    // State may arrive from host slightly after the group is rendered, so poll.
+    await panel.waitForFunction(
+      () => {
+        const span = document.querySelector('tr.group-header-row[data-groupid="1"] .group-header-content span');
+        return span?.textContent?.trim().startsWith('\u25b8') ?? false;
+      },
+      { timeout: 8_000 }
+    );
   });
 
   // ---------------------------------------------------------------------------

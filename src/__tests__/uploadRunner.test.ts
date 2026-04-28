@@ -218,4 +218,52 @@ describe('runUploadRunner', () => {
     expect(result.status).toBe('cancelled');
     expect(result.errorMessage).toBe('Upload cancelled.');
   });
+
+  it('reconnects to delete partial remote file when abort destroys the active connection', async () => {
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const disconnect = jest.fn().mockResolvedValue(undefined);
+    const deleteFile = jest.fn()
+      .mockRejectedValueOnce(new Error('socket closed'))
+      .mockResolvedValueOnce(undefined);
+
+    const result = await runUploadRunner({
+      preset: BASE_PRESET,
+      connectOptions: {
+        host: BASE_PRESET.host,
+        port: BASE_PRESET.port,
+        username: BASE_PRESET.username,
+        password: 'pw',
+      },
+      request: {
+        mode: 'pistol_file',
+        presetName: BASE_PRESET.name,
+        selectedPaths: ['/upload'],
+        files: ['C:/tmp/invoice.xml'],
+      },
+      transport: {
+        connect,
+        uploadFile: jest.fn().mockRejectedValue(Object.assign(new Error('Upload aborted by user'), { name: 'AbortError' })),
+        disconnect,
+        deleteFile,
+        abort: jest.fn(),
+        forceAbort: jest.fn(),
+        listDirectory: jest.fn(),
+        isAborted: false,
+      },
+      stateManager: {
+        addToHistory: jest.fn().mockResolvedValue(undefined),
+        setState: jest.fn().mockResolvedValue(undefined),
+      },
+      zipBuilder: jest.fn(),
+      now: () => new Date('2026-04-22T10:00:00.000Z'),
+      createId: () => 'history-cleanup',
+      onProgress: jest.fn(),
+    });
+
+    expect(result.status).toBe('cancelled');
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(disconnect).toHaveBeenCalledTimes(2);
+    expect(deleteFile).toHaveBeenCalledTimes(2);
+    expect(deleteFile).toHaveBeenCalledWith('/upload/invoice.xml');
+  });
 });

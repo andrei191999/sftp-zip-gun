@@ -64,22 +64,74 @@ test.describe('FileZilla import', () => {
     const { app, cleanup } = await launchVsCode();
     try {
       const mainWindow = await app.firstWindow();
-      await mainWindow.waitForSelector('.monaco-workbench', { timeout: 30_000 });
+      await mainWindow.waitForSelector('.monaco-workbench', { timeout: 45_000 });
+      await new Promise(r => setTimeout(r, 2_000));
       const panel = await openPanelAndFindWebview(app, mainWindow);
 
-      await panel.click('.view-tab:has-text("Manage connections")');
+      await panel.locator('.view-tab:has-text("Manage connections")').evaluate((button: HTMLElement) => button.click());
+      await expect(panel.locator('button:has-text("Import from FileZilla")')).toBeVisible({ timeout: 10_000 });
 
       // The click handler sets state.importPending = true synchronously and
-      // calls render() before posting the host message, so the spinner should
-      // appear in the DOM immediately (before any OS dialog opens).
-      await panel.click('button:has-text("Import from FileZilla")');
+      // calls render() before posting the host message. Capture that immediate
+      // DOM state in-page so this assertion is not held hostage by the native
+      // file picker flow after the click.
+      const importPendingState = await panel.evaluate(() => {
+        const restoreTransport = (() => {
+          try {
+            const webviewHost = (window as Window & {
+              chrome?: { webview?: { postMessage?: (message: unknown) => void } };
+            }).chrome?.webview;
+            if (webviewHost && typeof webviewHost.postMessage === 'function') {
+              const originalPostMessage = webviewHost.postMessage.bind(webviewHost);
+              webviewHost.postMessage = () => undefined;
+              return () => { webviewHost.postMessage = originalPostMessage; };
+            }
+          } catch { /* fall through */ }
 
-      // Spinner is a span.spinner appended to the action row when importPending.
-      await expect(panel.locator('.spinner').first()).toBeVisible({ timeout: 5_000 });
+          try {
+            const parentWindow = window.parent as Window & {
+              postMessage?: (message: unknown, targetOrigin: string, transfer?: Transferable[]) => void;
+            };
+            if (typeof parentWindow.postMessage === 'function') {
+              const originalPostMessage = parentWindow.postMessage.bind(parentWindow);
+              parentWindow.postMessage = () => undefined;
+              return () => { parentWindow.postMessage = originalPostMessage; };
+            }
+          } catch { /* ignore */ }
 
-      // The import button itself is also disabled while pending.
-      const importBtn = panel.locator('button:has-text("Import from FileZilla")');
-      await expect(importBtn).toBeDisabled({ timeout: 5_000 });
+          return () => {};
+        })();
+
+        const findImportButton = (): HTMLButtonElement | null => {
+          return Array.from(document.querySelectorAll('button')).find(
+            (button): button is HTMLButtonElement => button.textContent?.includes('Import from FileZilla') ?? false
+          ) ?? null;
+        };
+
+        try {
+          const importButton = findImportButton();
+          if (!importButton) {
+            return { found: false, disabled: false, spinnerVisible: false };
+          }
+
+          importButton.click();
+
+          const currentButton = findImportButton();
+          return {
+            found: true,
+            disabled: currentButton?.disabled ?? false,
+            spinnerVisible: !!document.querySelector('.spinner'),
+          };
+        } finally {
+          restoreTransport();
+        }
+      });
+
+      expect(importPendingState).toEqual({
+        found: true,
+        disabled: true,
+        spinnerVisible: true,
+      });
     } finally {
       try { await app.close(); } catch { /* ignore */ }
       cleanup();

@@ -171,7 +171,7 @@ window.addEventListener('message', function (event) {
       var p = msg.payload;
       if (p.lastFolder && !state.folderPath)                  { state.folderPath = p.lastFolder; }
       if (p.lastPresetName && !state.selectedPresetName)      { state.selectedPresetName = p.lastPresetName; }
-      if (p.mode)                                             { state.mode = p.mode; }
+      if (p.mode && !_hasSavedMode)                           { state.mode = p.mode; }
       if (p.anchorFile)                                       { state.anchorFile = p.anchorFile; }
       if (p.sectionCollapsed)                                 { state.sectionCollapsed = p.sectionCollapsed; }
       if (p.groupCollapsed)                                   { state.groupCollapsed = p.groupCollapsed; }

@@ -69,6 +69,7 @@ let state = {
 // ---------------------------------------------------------------------------
 
 const _saved = vscode.getState();
+const _hasSavedMode = !!(_saved && _saved.mode);
 if (_saved) {
   if (_saved.mode) { state.mode = _saved.mode; }
   if (_saved.selectedPresetName) { state.selectedPresetName = _saved.selectedPresetName; }

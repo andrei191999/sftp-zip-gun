@@ -2,12 +2,13 @@ import { test } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import { assertDockerRunning } from './helpers/docker-check';
-import { storeDir, listFiles, waitFor } from './helpers/sftp-verify';
+import { listFiles, makeRemoteTestDir, waitFor } from './helpers/sftp-verify';
 import {
   launchSharedVsCode,
   makeTestFolder,
   addPreset,
   selectPreset,
+  selectOneTimeRemotePath,
   selectFile,
   loadFolder,
   switchMode,
@@ -33,12 +34,12 @@ function createLargeFile(dir: string, tag: string): string {
 
 /** Clicks FIRE, waits for HOLD to become enabled, then clicks HOLD. */
 async function startAndCancel(panel: any): Promise<void> {
-  await panel.click('.btn-fire');
+  await panel.locator('.btn-fire').evaluate((button: HTMLButtonElement) => button.click());
   await panel.waitForFunction(
     () => !(document.querySelector('.btn-hold') as HTMLButtonElement | null)?.disabled,
     { timeout: 15_000 }
   );
-  await panel.click('.btn-hold');
+  await panel.locator('.btn-hold').evaluate((button: HTMLButtonElement) => button.click());
 }
 
 test.describe.serial('cancel flows', () => {
@@ -70,28 +71,29 @@ test.describe.serial('cancel flows', () => {
     return shared;
   }
 
-  test('cancel mid-upload leaves no file on server', async () => {
+  test('cancel mid-upload leaves no file on server', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'cancel-pistol');
     const localFile = createLargeFile(folder, 'pistol');
+    const remote = makeRemoteTestDir(testInfo, 'pwuser', 'cancel-pistol');
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remote.remoteDir);
     await loadFolder(panel, folder);
     await switchMode(panel, 'pistol_file');
     await selectFile(panel, localFile);
 
-    const before = new Set(listFiles(storeDir('pwuser')));
     await startAndCancel(panel);
 
     await waitFor(
-      () => listFiles(storeDir('pwuser')).filter(n => !before.has(n)).length === 0,
+      () => listFiles(remote.hostDir).length === 0,
       'unexpected files appeared after cancel',
       8_000
     );
     await waitForUploadIdle(panel);
   });
 
-  test('cancel during ZIP Canon leaves no zip on server', async () => {
+  test('cancel during ZIP Canon leaves no zip on server', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'cancel-canon');
     const files = [1, 2, 3].map(i => {
@@ -99,24 +101,25 @@ test.describe.serial('cancel flows', () => {
       fs.writeFileSync(p, Buffer.alloc(17 * 1024 * 1024, 0x43)); // 17 MB each = 51 MB total
       return p;
     });
+    const remote = makeRemoteTestDir(testInfo, 'pwuser', 'cancel-canon');
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remote.remoteDir);
     await loadFolder(panel, folder);
     await switchMode(panel, 'zip_canon');
     for (const f of files) { await selectFile(panel, f); }
 
-    const before = new Set(listFiles(storeDir('pwuser')));
     await startAndCancel(panel);
 
     await waitFor(
-      () => listFiles(storeDir('pwuser')).filter(n => n.endsWith('.zip') && !before.has(n)).length === 0,
+      () => listFiles(remote.hostDir).length === 0,
       'unexpected zip appeared after cancel',
       8_000
     );
     await waitForUploadIdle(panel);
   });
 
-  test('cancel during ZIP Gun leaves no zips on server', async () => {
+  test('cancel during ZIP Gun leaves no zips on server', async ({}, testInfo) => {
     const { panel, workspaceDir } = session();
     const folder = makeTestFolder(workspaceDir, 'cancel-gun');
     const files = [1, 2].map(i => {
@@ -124,8 +127,10 @@ test.describe.serial('cancel flows', () => {
       fs.writeFileSync(p, Buffer.alloc(25 * 1024 * 1024, 0x44)); // 25 MB each
       return p;
     });
+    const remote = makeRemoteTestDir(testInfo, 'pwuser', 'cancel-gun');
 
     await selectPreset(panel, PW_PRESET.name);
+    await selectOneTimeRemotePath(panel, remote.remoteDir);
     await loadFolder(panel, folder);
     await switchMode(panel, 'zip_gun');
 
@@ -135,11 +140,10 @@ test.describe.serial('cancel flows', () => {
     await panel.locator(groupSel(files[0])).selectOption('__new__');
     await panel.locator(groupSel(files[1])).selectOption('1');
 
-    const before = new Set(listFiles(storeDir('pwuser')));
     await startAndCancel(panel);
 
     await waitFor(
-      () => listFiles(storeDir('pwuser')).filter(n => n.endsWith('.zip') && !before.has(n)).length === 0,
+      () => listFiles(remote.hostDir).length === 0,
       'unexpected zip appeared after cancel',
       8_000
     );
