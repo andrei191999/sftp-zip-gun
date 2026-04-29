@@ -71,7 +71,11 @@ test.describe.serial('bookmark flows', () => {
   async function fillAddPathInput(value: string): Promise<void> {
     await expect(async () => {
       const input = await waitForAddPathInput();
-      await input.fill(value);
+      await input.evaluate((element: HTMLInputElement, nextValue) => {
+        element.value = nextValue;
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      }, value);
       await expect(input).toHaveValue(value, { timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
   }

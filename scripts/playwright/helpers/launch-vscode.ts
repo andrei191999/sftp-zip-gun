@@ -172,19 +172,22 @@ export async function findWorkbenchWindow(
 async function findVisiblePanelTarget(
   app: ElectronApplication,
   workbenchWindow: Page,
-  timeoutMs: number
+  timeoutMs: number,
+  excludedTargets: PanelTarget[] = []
 ): Promise<PanelTarget | undefined> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     // (a) separate windows
     for (const w of app.windows()) {
       if (w === workbenchWindow) continue;
+      if (excludedTargets.includes(w)) continue;
       try {
         if (await isPanelTargetReady(w)) return w;
       } catch { /* detached */ }
     }
     // (b) inline frames
     for (const frame of workbenchWindow.frames()) {
+      if (excludedTargets.includes(frame)) continue;
       try {
         if (await isPanelTargetReady(frame)) return frame;
       } catch { /* detached */ }
@@ -193,6 +196,13 @@ async function findVisiblePanelTarget(
   }
 
   return undefined;
+}
+
+function collectExistingPanelTargets(app: ElectronApplication, workbenchWindow: Page): PanelTarget[] {
+  return [
+    ...app.windows().filter(window => window !== workbenchWindow),
+    ...workbenchWindow.frames(),
+  ];
 }
 
 async function isPanelTargetReady(target: PanelTarget): Promise<boolean> {
@@ -481,7 +491,8 @@ export async function waitForUploadIdle(panel: PanelTarget): Promise<void> {
  */
 export async function openPanelAndFindWebview(
   app: ElectronApplication,
-  mainWindow: Page
+  mainWindow: Page,
+  excludedTargets: PanelTarget[] = []
 ): Promise<Frame | Page> {
   const workbenchWindow = await findWorkbenchWindow(app, mainWindow);
 
@@ -498,7 +509,8 @@ export async function openPanelAndFindWebview(
     const statusPanel = await findVisiblePanelTarget(
       app,
       workbenchWindow,
-      statusTriggered ? 12_000 : 2_000
+      statusTriggered ? 12_000 : 2_000,
+      excludedTargets
     );
     if (statusPanel) return statusPanel;
 
@@ -507,13 +519,19 @@ export async function openPanelAndFindWebview(
       const commandPanel = await findVisiblePanelTarget(
         app,
         workbenchWindow,
-        isHeadedRun() ? 20_000 : 30_000 + attempt * 15_000
+        isHeadedRun() ? 20_000 : 30_000 + attempt * 15_000,
+        excludedTargets
       );
       if (commandPanel) return commandPanel;
     } catch { /* retry status bar below */ }
 
     if (await triggerOpenPanelFromStatusBar(workbenchWindow, isHeadedRun() ? 1_500 : 4_000)) {
-      const retryPanel = await findVisiblePanelTarget(app, workbenchWindow, 12_000 + attempt * 5_000);
+      const retryPanel = await findVisiblePanelTarget(
+        app,
+        workbenchWindow,
+        12_000 + attempt * 5_000,
+        excludedTargets
+      );
       if (retryPanel) return retryPanel;
     }
 
@@ -525,13 +543,38 @@ export async function openPanelAndFindWebview(
   throw new Error('SFTP Zip Gun webview (ready panel with #app and tabs) not found within launch timeout');
 }
 
+async function waitForPanelTargetToDisappear(target: PanelTarget, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const appRoot = target.locator('#app').first();
+      if ((await appRoot.count()) === 0) {
+        return;
+      }
+      if (!await appRoot.isVisible()) {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+
 export async function closeAndReopenPanel(
   app: ElectronApplication,
-  mainWindow: Page
+  mainWindow: Page,
+  previousPanel?: PanelTarget
 ): Promise<{ mainWindow: Page; panel: PanelTarget }> {
   let workbenchWindow: Page | undefined;
+  let excludedTargets: PanelTarget[] = previousPanel ? [previousPanel] : [];
   for (let attempt = 0; attempt < 3; attempt++) {
     workbenchWindow = await findWorkbenchWindow(app, attempt === 0 ? mainWindow : undefined);
+    excludedTargets = Array.from(new Set([
+      ...excludedTargets,
+      ...collectExistingPanelTargets(app, workbenchWindow),
+    ]));
     try {
       await workbenchWindow.keyboard.press('Control+W');
       break;
@@ -547,10 +590,13 @@ export async function closeAndReopenPanel(
   if (!workbenchWindow) {
     throw new Error('VS Code workbench window not found before panel close');
   }
-  await new Promise(r => setTimeout(r, 800));
+  if (previousPanel) {
+    await waitForPanelTargetToDisappear(previousPanel, 10_000).catch(() => {});
+  }
+  await new Promise(r => setTimeout(r, isHeadedRun() ? 800 : 1_500));
 
   const currentWorkbench = await findWorkbenchWindow(app, workbenchWindow);
-  const panel = await openPanelAndFindWebview(app, currentWorkbench);
+  const panel = await openPanelAndFindWebview(app, currentWorkbench, excludedTargets);
   return { mainWindow: await findWorkbenchWindow(app, currentWorkbench), panel };
 }
 
@@ -596,20 +642,26 @@ export async function addPreset(
   await remoteDirInput.fill(preset.remoteDir);
 
   if (preset.authType === 'key') {
-    const keyRadio = form.locator('input[type="radio"][value="key"]');
-    await keyRadio.click();
-    const keyInput = form.locator('#f-auth-fields input[placeholder="/home/user/.ssh/id_rsa"]');
-    await expect(keyInput).toBeVisible({ timeout: 15_000 });
-    await keyInput.fill(preset.keyPath ?? '');
-    await expect(keyInput).toHaveValue(preset.keyPath ?? '', { timeout: 2_000 });
+    await expect(async () => {
+      const keyRadio = form.locator('input[type="radio"][value="key"]');
+      await keyRadio.check({ force: true });
+      await expect(keyRadio).toBeChecked({ timeout: 2_000 });
+      const keyInput = form.locator('#f-auth-fields input[placeholder="/home/user/.ssh/id_rsa"]');
+      await expect(keyInput).toBeVisible({ timeout: 2_000 });
+      await keyInput.fill(preset.keyPath ?? '');
+      await expect(keyInput).toHaveValue(preset.keyPath ?? '', { timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   } else {
-    const passwordRadio = form.locator('input[type="radio"][value="password"]');
-    await passwordRadio.click();
     if (preset.password) {
-      const passwordInput = form.locator('#f-auth-fields input[type="password"]');
-      await expect(passwordInput).toBeVisible({ timeout: 15_000 });
-      await passwordInput.fill(preset.password ?? '');
-      await expect(passwordInput).toHaveValue(preset.password ?? '', { timeout: 2_000 });
+      await expect(async () => {
+        const passwordRadio = form.locator('input[type="radio"][value="password"]');
+        await passwordRadio.check({ force: true });
+        await expect(passwordRadio).toBeChecked({ timeout: 2_000 });
+        const passwordInput = form.locator('#f-auth-fields input[type="password"]');
+        await expect(passwordInput).toBeVisible({ timeout: 2_000 });
+        await passwordInput.fill(preset.password ?? '');
+        await expect(passwordInput).toHaveValue(preset.password ?? '', { timeout: 2_000 });
+      }).toPass({ timeout: 15_000 });
     }
   }
 
@@ -628,28 +680,12 @@ export async function addPreset(
 
 /** Selects a preset from the Account dropdown. */
 export async function selectPreset(panel: PanelTarget, presetName: string): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  let lastError: unknown;
-
-  while (Date.now() < deadline) {
-    try {
-      const select = panel.locator('#preset-select');
-      await select.waitFor({ state: 'visible', timeout: 5_000 });
-      await select.evaluate((element: HTMLSelectElement, value) => {
-        element.value = value;
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-      }, presetName);
-      await expect(select).toHaveValue(presetName, { timeout: 5_000 });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise(r => setTimeout(r, 300));
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(`Timed out selecting preset "${presetName}"`);
+  await expect(async () => {
+    const select = panel.locator('#preset-select');
+    await expect(select).toBeVisible({ timeout: 2_000 });
+    await select.selectOption({ value: presetName });
+    await expect(select).toHaveValue(presetName, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 /**

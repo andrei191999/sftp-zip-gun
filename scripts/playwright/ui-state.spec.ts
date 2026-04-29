@@ -73,7 +73,7 @@ test.describe.serial('ui-state', () => {
     await switchMode(panel, 'zip_canon');
     await new Promise(r => setTimeout(r, 300));
 
-    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    const reopened = await closeAndReopenPanel(app, session().mainWindow, panel);
     syncSession(reopened);
     panel = reopened.panel;
 
@@ -90,8 +90,9 @@ test.describe.serial('ui-state', () => {
 
     // Ensure the preset is selected before closing
     await selectPreset(panel, PRESET.name);
+    await new Promise(r => setTimeout(r, 300));
 
-    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    const reopened = await closeAndReopenPanel(app, session().mainWindow, panel);
     syncSession(reopened);
     panel = reopened.panel;
 
@@ -116,7 +117,7 @@ test.describe.serial('ui-state', () => {
     await panel.waitForSelector('#section-files .section-body', { state: 'detached', timeout: 5_000 });
     await new Promise(r => setTimeout(r, 300));
 
-    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    const reopened = await closeAndReopenPanel(app, session().mainWindow, panel);
     syncSession(reopened);
     panel = reopened.panel;
 
@@ -414,7 +415,7 @@ test.describe.serial('ui-state', () => {
     }, { timeout: 5_000 });
     await new Promise(r => setTimeout(r, 300));
 
-    const reopened = await closeAndReopenPanel(app, session().mainWindow);
+    const reopened = await closeAndReopenPanel(app, session().mainWindow, panel);
     syncSession(reopened);
     panel = reopened.panel;
 
