@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import archiver from 'archiver';
 
-function formatTimestamp(date: Date): string {
+export function formatTimestamp(date: Date): string {
   const year = date.getFullYear().toString();
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');
@@ -19,8 +19,7 @@ export function buildZip(
   onProgress?: (processed: number, total: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const timestamp = formatTimestamp(new Date());
-    const zipName = `${baseName}_${timestamp}.zip`;
+    const zipName = `${baseName}.zip`;
     const outPath = path.join(path.dirname(anchorFile), zipName);
 
     const output = fs.createWriteStream(outPath);

@@ -1,0 +1,496 @@
+# E2E Verification Status
+
+## Current Status
+
+- State: `blocked`
+- Branch: `feature/v0.2.1-review`
+- Commit under test: `1cd3d1d51ef64e57fb685356c83728a57f4caa41`
+- Publish readiness: not ready
+
+## Verification Matrix Snapshot
+
+| Command | Latest Status | Notes |
+| --- | --- | --- |
+| `npm run compile` | pass | built successfully on commit `1cd3d1d` |
+| `npm run typecheck` | pass | clean exit 0 |
+| `npm run test:unit` | pass | `8` suites, `49` tests passed |
+| `npm run test:e2e:cleanup:test` | pass | cleanup matcher assertions passed |
+| `npm run test:e2e:headless` | fail | sandbox attempt hit `spawn EPERM`; escalated rerun failed on `ui-state` timeout after `80` passes |
+| `npm run test:e2e:headless:2` | pass | full suite green; `95` passed |
+| `npm run test:e2e:headless:3` | pass | full suite green; `95` passed |
+| `npm run test:e2e:headless:4` | flaky | `93` passed; `bookmarks` and `cancel` timed out in `beforeAll` then passed on retry |
+| `npm run test:e2e:headed` | fail | `bookmarks` breadcrumb/tab-state failure plus `ui-state` panel-loss timeout |
+| `npm run test:e2e:parallel:headed` | flaky | `connection` add-flow flake in `addPreset()`; retry passed |
+| `npm run test:e2e:parallel:headed:4` | pass | full suite green; `95` passed |
+
+## Open Failure Buckets
+
+- `ui-state` reopen/persistence timeout in `npm run test:e2e:headless`
+- focused `npm run test:e2e:state` reproduced the bucket but shifted the failure to the next reopen test (`last preset persists after panel close/reopen`)
+- the same `ui-state` bucket did not reproduce in `npm run test:e2e:headless:2`, so the issue is sequence/timing specific rather than a simple steady failure
+- `bookmarks` and `cancel` are flaky at `4` headless workers with `beforeAll` timeouts during shared VS Code launch / preset setup
+  - subagent classification: `harness`
+- headed-only `bookmarks` failure: remote-browse overlay remained active when the test expected transfer-tab UI
+  - subagent classification: `possible product`
+- headed-only `ui-state` failure: panel/webview appears missing after reopen during `section collapse persists`
+  - subagent classification: `possible product`
+- headed 2-worker `connection` flake: `addPreset()` timed out waiting for the preset form to close
+  - subagent classification: `test`
+- environment-only sandbox `spawn EPERM` for Playwright worker creation; resolved by escalated rerun but still worth remembering for future local tool runs
+
+## Next Recommended Fixes
+
+- Diagnose headed-only `bookmarks` transition from remote-browse overlay back to transfer-tab UI.
+- Diagnose headed `ui-state` panel-loss path after reopen, especially around section-collapse persistence.
+- Recheck `addPreset()` completion/close synchronization under headed parallel load.
+- Preserve sandbox `spawn EPERM` as an environment caveat for future agent-run Playwright commands.
+
+## Continuation Updates
+
+- `2026-04-29` focused `ui-state` rerun:
+  - command: `npm run test:e2e:headless -- scripts/playwright/ui-state.spec.ts --grep "mode persists after panel close/reopen"`
+  - sandbox result: `spawn EPERM` before test execution; treated as environment noise
+  - escalated result: pass, `1` test passed in ~41.5s
+  - status impact: the prior full-suite `mode persists` failure remains sequence-sensitive and did not reproduce in isolation
+- `2026-04-29` focused `ui-state` rerun:
+  - command: `npm run test:e2e:headless -- scripts/playwright/ui-state.spec.ts --grep "last preset persists after panel close/reopen"`
+  - escalated result: pass, `1` test passed in ~36.8s
+  - status impact: the adjacent reopen/preset failure also did not reproduce in isolation
+- `2026-04-29` focused `ui-state` rerun:
+  - command: `npm run test:e2e:headed -- scripts/playwright/ui-state.spec.ts --grep "section collapse persists"`
+  - escalated result: pass, `1` test passed in ~35.0s
+  - status impact: the headed panel-loss failure did not reproduce in isolation
+- `2026-04-29` focused `bookmarks` rerun:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts --grep "breadcrumb shows current path segment"`
+  - escalated result: pass, `1` test passed in ~24.0s
+  - status impact: the headed breadcrumb/overlay failure did not reproduce in isolation
+- `2026-04-29` focused `connection` rerun:
+  - command: `npm run test:e2e:parallel:headed -- scripts/playwright/connection.spec.ts --grep "preset list count increases after add"`
+  - escalated result: pass, `1` test passed in ~21.7s
+  - status impact: add-flow behavior is clean in isolation, but this does not exercise the original multi-worker contention pattern
+- `2026-04-29` focused `headless:4` setup rerun:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/bookmarks.spec.ts scripts/playwright/cancel.spec.ts`
+  - escalated result: flaky, `12` passed and `1` flaky in ~2.1m
+  - failure: `bookmarks.spec.ts:93:7` failed in `beforeAll` at `launchSharedVsCode()` / `openPanelAndFindWebview()` with `SFTP Zip Gun webview (ready panel with #app and tabs) not found within launch timeout`, then passed on retry
+  - artifact: `test-results/bookmarks-bookmark-flows-a-e0c21-appears-in-send-to-dropdown/error-context.md`
+  - status impact: confirms the headless 4-worker bucket as harness startup/open-panel contention
+- `2026-04-29` post-fix validation:
+  - command: `npm run typecheck`
+  - result: pass in ~9.1s after harness command-palette opening change
+- `2026-04-29` post-fix validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/bookmarks.spec.ts scripts/playwright/cancel.spec.ts`
+  - result: fail in ~4.3m
+  - failures: `bookmarks.spec.ts:93:7` failed in setup at `openPanelAndFindWebview()` on first attempt and timed out in `beforeAll` on retry; `cancel.spec.ts:74:7` timed out in `beforeAll` on first attempt and retry
+  - status impact: command-palette fill/fallback was a failed harness hypothesis; current evidence points to total setup budget exhaustion when multiple VS Code Extension Development Hosts launch concurrently
+- `2026-04-29` post-lock validation:
+  - command: `npm run typecheck`
+  - result: pass in ~26.7s after adding a cross-process VS Code launch lock to `launchSharedVsCode()`
+- `2026-04-29` post-lock validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/bookmarks.spec.ts scripts/playwright/cancel.spec.ts`
+  - result: pass, `13` passed in ~1.6m with no retries/flakes
+  - status impact: direct `headless:4` setup bucket validated green after serializing shared VS Code startup/open-panel setup
+- `2026-04-29` widened post-lock validation:
+  - command: `npm run test:e2e:headless:4`
+  - result: flaky, `93` passed and `2` flaky in ~9.9m
+  - status impact: original bookmarks/cancel `beforeAll` setup bucket did not recur, but two new retry-passing flakes appeared
+  - new flaky bucket: `bookmarks.spec.ts:368:7` overlay remained visible after `Bookmark` then `Cancel`; likely test synchronization around remote-browse overlay close
+  - new flaky bucket: `history-filter.spec.ts:246:7` ZIP Canon upload hit `getConnection: Timed out while waiting for handshake`; likely SFTP service/load contention under full 4-worker run
+- `2026-04-29` post-bookmarks-overlay fix:
+  - command: `npm run typecheck`
+  - result: pass in ~4.3s after using the robust remote-browse overlay close helper throughout `bookmarks.spec.ts`
+- `2026-04-29` post-bookmarks-overlay validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/bookmarks.spec.ts --grep "bookmark from overlay saves to bookmarks list"`
+  - result: pass, `1` passed in ~38.0s
+- `2026-04-29` post-bookmarks-overlay validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/bookmarks.spec.ts`
+  - result: pass, `10` passed in ~42.9s
+  - status impact: bookmarks overlay cleanup bucket validated at full-spec scope
+- `2026-04-29` focused history-filter validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/history-filter.spec.ts --grep "mode filter canon hides pistol entry"`
+  - result: pass, `1` passed in ~38.5s
+  - status impact: canon upload/filter path is clean outside full-suite 4-worker load; handshake timeout remains classified as SFTP service/load contention
+- `2026-04-29` full history-filter validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/history-filter.spec.ts`
+  - result: pass, `11` passed in ~54.0s
+- `2026-04-29` product-resilience RED:
+  - command: `npm run test:unit -- sftpClient.test.ts`
+  - result: fail in ~7.2s, expected because `SftpClient.connect()` did not include `readyTimeout: 60000`
+- `2026-04-29` product-resilience GREEN:
+  - command: `npm run test:unit -- sftpClient.test.ts`
+  - result: pass in ~5.7s after adding `readyTimeout: 60000` to SFTP connection config
+- `2026-04-29` post-product-resilience validation:
+  - command: `npm run typecheck`
+  - result: pass in ~7.7s
+- `2026-04-29` post-product-resilience validation:
+  - command: `npm run test:unit`
+  - result: pass, `9` suites and `50` tests in ~10.4s
+- `2026-04-29` widened validation after fixes:
+  - command: `npm run test:e2e:headless:4`
+  - result: pass, `95` passed in ~6.8m with no retries/flakes
+  - status impact: original headless:4 setup bucket and the later bookmarks/history-filter flakes are green at full-suite scope
+- `2026-04-29` widened one-worker headless validation:
+  - command: `npm run test:e2e:headless`
+  - result: fail, `91` passed, `1` failed, `3` did not run in ~9.9m
+  - failure: `bookmarks.spec.ts:261:7` could not open the transfer tab because the remote-browse overlay was visible at `/store`
+  - status impact: confirms the old breadcrumb bucket as a remote-browse stale-response race; likely late `remoteDirListed` after cancel
+- `2026-04-29` remote-browse race RED:
+  - command: `npm run test:unit -- panelBridge.test.ts`
+  - result: fail in ~11.5s, expected because stale `remoteDirListed` recreated `state.remoteBrowse` after cancel
+- `2026-04-29` remote-browse race GREEN:
+  - command: `npm run test:unit -- panelBridge.test.ts`
+  - result: pass in ~3.8s after ignoring stale `remoteDirListed` unless an active same-path browse request exists
+- `2026-04-29` remote-browse race build:
+  - command: `npm run compile`
+  - result: pass in ~3.7s; regenerated `media/panel.js`, `media/panel.css`, and `dist/extension.js`
+- `2026-04-29` remote-browse race validation:
+  - command: `npm run test:e2e:headless -- scripts/playwright/bookmarks.spec.ts`
+  - result: pass, `10` passed in ~53.5s
+  - status impact: one-worker bookmarks breadcrumb bucket validated at spec scope
+- `2026-04-29` widened one-worker headless validation:
+  - command: `npm run test:e2e:headless`
+  - result: fail, `94` passed and `1` failed in ~10.9m
+  - failure: `connection.spec.ts:253:7` timed out waiting for renamed card; artifact showed the edit form still open with blank Name and log `Name, Host, and Username are required.`
+  - status impact: new test synchronization bucket in connection edit/rename flow
+- `2026-04-29` connection rename sync validation:
+  - command: `npm run typecheck`
+  - result: pass in ~5.7s after scoping rename form locators and asserting the field value before save
+- `2026-04-29` connection rename sync validation:
+  - command: `npm run test:e2e:headless -- scripts/playwright/connection.spec.ts`
+  - result: pass, `9` passed in ~41.7s
+  - status impact: connection rename/NEW badge bucket validated at spec scope
+- `2026-04-29` widened one-worker headless validation:
+  - command: `npm run test:e2e:headless`
+  - result: pass, `95` passed in ~12.5m
+  - status impact: one-worker headless is green after remote-browse stale-response and connection rename synchronization fixes
+- `2026-04-29` headed rerun after focused fixes:
+  - command: `npm run test:e2e:headed`
+  - result: fail, `82` passed, `1` failed, `12` did not run in ~14.4m
+  - failure: `scripts/playwright/ui-state.spec.ts:104:7` timed out in `section collapse persists`
+  - artifact: `test-results/ui-state-ui-state-section-collapse-persists/error-context.md`
+  - symptom: VS Code was alive with an empty editor group and the `SFTP Zip Gun` status bar button present, but no panel/webview was visible
+  - status impact: headed panel-loss bucket remains open; likely harness close/reopen target exclusion or reopen detection issue
+- `2026-04-29` headed reopen harness validation:
+  - command: `npm run typecheck`
+  - result: pass in ~7.8s
+  - status impact: TypeScript is clean after making panel close detection strict and reopening without excluding possible reused webview targets
+- `2026-04-29` headed reopen harness focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/ui-state.spec.ts --grep "section collapse persists"`
+  - sandbox result: `spawn EPERM` before test execution; treated as environment noise
+  - escalated result: pass, `1` passed in ~53.5s
+  - status impact: focused headed panel-loss repro is green after the reopen helper change
+- `2026-04-29` headed reopen harness spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/ui-state.spec.ts`
+  - result: pass, `15` passed in ~1.4m
+  - status impact: headed `ui-state` close/reopen and section-collapse bucket is green at spec scope
+- `2026-04-29` headed full-suite rerun:
+  - command: `npm run test:e2e:headed`
+  - result: fail, `84` passed, `2` failed, `9` did not run in ~13.5m
+  - resolved prior signals: bookmarks breadcrumb/current-path and ui-state section-collapse both passed in the full headed suite
+  - failures:
+    - `scripts/playwright/connection.spec.ts:59:7` failed in shared setup because `openPanelAndFindWebview()` did not find a ready panel
+    - `scripts/playwright/ui-state.spec.ts:390:7` timed out in `groupCollapsed persists after collapse`
+  - artifacts:
+    - `test-results/connection-connection-and--d1f5d--✓-indicator-on-preset-card/error-context.md`
+    - `test-results/ui-state-ui-state-groupCollapsed-persists-after-collapse/error-context.md`
+  - status impact: headed matrix still has a startup/open-panel harness bucket and a sequence-sensitive ui-state close/reopen bucket
+- `2026-04-29` headed open-panel harness validation:
+  - command: `npm run typecheck`
+  - result: pass in ~8.1s
+  - status impact: TypeScript is clean after using a forced status-bar click, keybinding fallback, and exact command-palette selection for panel opening
+- `2026-04-29` headed open-panel focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/connection.spec.ts --grep "success shows"`
+  - result: pass, `1` passed in ~37.6s
+  - status impact: focused connection setup/open-panel failure did not reproduce after opener hardening
+- `2026-04-29` headed open-panel focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/ui-state.spec.ts --grep "groupCollapsed persists after collapse"`
+  - result: pass, `1` passed in ~1.1m
+  - status impact: focused ui-state group-collapse close/reopen failure did not reproduce after opener hardening
+- `2026-04-29` headed open-panel affected-spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/connection.spec.ts scripts/playwright/ui-state.spec.ts`
+  - result: pass, `24` passed in ~1.7m
+  - status impact: affected headed connection and ui-state specs are green together after opener hardening
+- `2026-04-29` headed full-suite rerun:
+  - command: `npm run test:e2e:headed`
+  - result: fail, `81` passed, `1` failed, `13` did not run in ~11.6m
+  - resolved prior signal: connection setup/open-panel failure did not recur
+  - failure: `scripts/playwright/ui-state.spec.ts:87:7` timed out in `last preset persists after panel close/reopen`
+  - artifact: `test-results/ui-state-ui-state-last-pre-5c4d8-ts-after-panel-close-reopen/error-context.md`
+  - status impact: remaining headed failure is the original sequence-sensitive ui-state close/reopen bucket shifting among adjacent reopen tests
+- `2026-04-29` headed host isolation evidence:
+  - command: `code --list-extensions | Select-String -Pattern 'gemini|google|cloud|copilot|claude' -CaseSensitive:$false`
+  - result: identified installed `google.gemini-cli-vscode-ide-companion`, matching the notification visible in the latest headed failure artifact
+  - environment note: the command also hit a VS Code log-directory `EPERM` after listing extensions
+- `2026-04-29` headed host isolation validation:
+  - command: `npm run typecheck`
+  - result: pass in ~15.9s
+  - status impact: TypeScript is clean after disabling the Gemini CLI Companion and Claude Code extensions in E2E VS Code launch args
+- `2026-04-29` final headed full-suite rerun:
+  - command: `npm run test:e2e:headed`
+  - result: fail, `71` passed, `2` failed, `22` did not run in ~11.8m
+  - failures:
+    - `scripts/playwright/bookmarks.spec.ts:136:7` failed because the exact `/store` option assertion saw `undefined`
+    - `scripts/playwright/ui-state.spec.ts:66:7` timed out in `mode persists after panel close/reopen`
+  - artifacts:
+    - `test-results/bookmarks-bookmark-flows-s-97856-t-as-default-button-appears/error-context.md`
+    - `test-results/ui-state-ui-state-mode-persists-after-panel-close-reopen/error-context.md`
+  - status impact:
+    - bookmarks artifact shows both `/store (default)` and `/store` options rendered, so this now looks like test synchronization/text-exactness
+    - ui-state close/reopen remains unresolved in the full headed sequence, with no Gemini notification in the latest artifact
+- `2026-04-30` headed stability implementation validation:
+  - command: `npm run typecheck`
+  - result: pass in ~8.3s
+  - status impact: TypeScript is clean after the bookmarks option-value wait, headed panel diagnostics, deterministic SFTP tab close, opener tracing, and Windows working-area tiling changes
+- `2026-04-30` headed stability focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts --grep "set bookmark as default"`
+  - sandbox result: `spawn EPERM` before test execution; treated as environment noise
+  - escalated result: blocked after ~11.6s because VS Code reported `Code is currently being updated`
+  - status impact: focused bookmarks validation did not execute; VS Code update state must be cleared before headed E2E can continue
+- `2026-04-30` E2E cleanup boundary validation:
+  - command: `taskkill /IM Code.exe /T /F`
+  - result: completed after approval; closed existing VS Code processes so VS Code could clear its update state
+- `2026-04-30` E2E cleanup boundary validation:
+  - command: `npm run test:e2e:cleanup:test`
+  - result: pass in ~6.3s
+  - status impact: orphaned VS Code matcher assertions still pass after adding post-run cleanup to `run-with-cleanup.mjs`
+- `2026-04-30` E2E cleanup boundary validation:
+  - command: `npm run typecheck`
+  - result: pass in ~10.6s
+  - status impact: TypeScript remains clean after post-run cleanup change
+- `2026-04-30` headed stability focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts --grep "set bookmark as default"`
+  - result: fail in ~31.6s
+  - failure: the focused test ran without the prior serial test that creates `/store`, so `#send-to-select option[value="/store"]` stayed at count `0`
+  - artifact: `test-results/bookmarks-bookmark-flows-s-97856-t-as-default-button-appears/error-context.md`
+  - status impact: make the test seed or verify its own bookmark prerequisite before using this command as focused validation
+- `2026-04-30` headed stability focused-test prep:
+  - command: `npm run typecheck`
+  - result: pass in ~11.2s
+  - status impact: TypeScript is clean after making the focused bookmarks set-default test seed `/store` when necessary
+- `2026-04-30` headed stability focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts --grep "set bookmark as default"`
+  - result: fail in ~83.6s
+  - failure: `launchSharedVsCode()` could not open the panel before test body
+  - evidence: diagnostics showed the SFTP status-bar command was not visible and the exact `SFTP Zip Gun: Open Upload Panel` command-palette result count was `0`
+  - artifact: `test-results/bookmarks-bookmark-flows-s-97856-t-as-default-button-appears/error-context.md`
+  - status impact: headed opener needs a more tolerant/condition-based command-palette trigger or extension-contribution wait
+- `2026-04-30` headed opener command-palette validation:
+  - command: `npm run typecheck`
+  - result: pass in ~10.5s
+  - status impact: TypeScript is clean after making command-palette opening fill the quick-input textbox directly and fall back to `Open Upload Panel`
+- `2026-04-30` headed stability focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts --grep "set bookmark as default"`
+  - result: pass, `1` passed in ~31.7s
+  - status impact: focused bookmarks set-default path is green after self-seeding `/store` and waiting by option value
+- `2026-04-30` headed stability focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/ui-state.spec.ts --grep "mode persists after panel close/reopen"`
+  - result: pass, `1` passed in ~24.2s
+  - status impact: focused headed ui-state close/reopen path is green after deterministic tab-close and command-palette fallback changes; helper confirmed `closeMethod=tab-close-button`
+- `2026-04-30` headed auth-noise isolation validation:
+  - command: `npm run typecheck`
+  - result: pass in ~6.5s
+  - status impact: TypeScript is clean after suppressing sign-in/account noise in the temporary E2E VS Code profile and disabling built-in GitHub/Microsoft auth providers for test hosts only
+- `2026-04-30` headed stability affected-spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts scripts/playwright/ui-state.spec.ts`
+  - result: pass, `25` passed in ~2.2m
+  - status impact: affected headed bookmarks and ui-state specs are green together; all close/reopen tests used the deterministic tab-close path
+- `2026-04-30` headed stability subagent-review validation:
+  - command: `npm run typecheck`
+  - result: pass in ~3.0s
+  - status impact: TypeScript remains clean after addressing subagent review risks in close/reopen targeting, bookmark focused-run seeding, and narrow-screen headed tiling
+- `2026-04-30` headed stability post-review focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts --grep "set bookmark as default"`
+  - result: pass, `1` passed in ~23.6s
+  - status impact: focused bookmarks validation remains green after preventing silent repair of serial persistence regressions
+- `2026-04-30` headed stability post-review focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/ui-state.spec.ts --grep "mode persists after panel close/reopen"`
+  - result: pass, `1` passed in ~21.2s
+  - status impact: focused headed ui-state reopen validation remains green after refusing unsafe keyboard close
+- `2026-04-30` headed stability post-review affected-spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/bookmarks.spec.ts scripts/playwright/ui-state.spec.ts`
+  - result: pass, `25` passed in ~1.2m
+  - status impact: affected headed bookmarks and ui-state specs remain green after the final harness refinements
+- `2026-04-30` headed full-suite rerun:
+  - command: `npm run test:e2e:headed`
+  - result: fail, `94` passed and `1` failed in ~9.2m
+  - failure: `scripts/playwright/filezilla.spec.ts:200:7` failed before assertion because `openPanelAndFindWebview()` could not find or open the panel in a fresh VS Code launch
+  - evidence: diagnostics showed no SFTP status command, no webview frame, and command-palette timeout; all previous bookmarks/ui-state/connection broad failure signals stayed green
+  - status impact: headed matrix improved substantially but still has one startup/open-panel readiness bucket in FileZilla import
+- `2026-04-30` headed FileZilla focused reproduction:
+  - command: `npm run test:e2e:headed -- scripts/playwright/filezilla.spec.ts --grep "NEW badge appears"`
+  - result: fail in ~1.1m
+  - failure: same pre-assertion panel-open failure as the full headed run
+  - status impact: FileZilla `NEW badge` test has a reproducible fresh-launch readiness race; adjacent FileZilla tests wait longer after workbench startup
+- `2026-04-30` headed FileZilla harness validation:
+  - command: `npm run typecheck`
+  - result: pass in ~5.7s
+  - status impact: TypeScript is clean after making all FileZilla tests use a consistent fresh-workbench settle before opening the panel
+- `2026-04-30` headed FileZilla focused validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/filezilla.spec.ts --grep "NEW badge appears"`
+  - result: pass, `1` passed in ~26.6s
+  - status impact: reproduced FileZilla startup/open-panel race is green at focused scope after the settle helper
+- `2026-04-30` headed FileZilla spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/filezilla.spec.ts`
+  - result: fail, `2` passed and `3` failed in ~4.6m
+  - failure: three tests failed before FileZilla assertions because the fresh headed VS Code launch did not open the SFTP panel
+  - status impact: FileZilla startup/open-panel bucket remains open; fixed settle alone is not sufficient
+- `2026-04-30` headed opener fresh-launch validation:
+  - command: `npm run typecheck`
+  - result: pass in ~5.3s
+  - status impact: TypeScript is clean after hardening command-palette opening against focus-stealing workbench noise and disabling installed extensions in the temp E2E host
+- `2026-04-30` headed FileZilla simplification validation:
+  - command: `npm run typecheck`
+  - result: pass in ~4.1s
+  - status impact: TypeScript is clean after converting FileZilla import tests to a serial shared VS Code session to reduce fresh headed VS Code launches
+- `2026-04-30` headed FileZilla spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/filezilla.spec.ts`
+  - result: fail, `4` passed and `1` failed in ~32.9s
+  - failure: `skipped count shown in session log` hit strict locator violation because shared-session logs now contain multiple `1 skipped` entries
+  - status impact: startup/open-panel race is resolved at FileZilla spec scope; remaining issue is a test assertion uniqueness assumption introduced by session sharing
+- `2026-04-30` headed FileZilla shared-log validation:
+  - command: `npm run typecheck`
+  - result: pass in ~3.6s
+  - status impact: TypeScript is clean after making FileZilla log assertions shared-session-safe
+- `2026-04-30` headed FileZilla spec validation:
+  - command: `npm run test:e2e:headed -- scripts/playwright/filezilla.spec.ts`
+  - result: pass, `5` passed in ~29.6s
+  - status impact: FileZilla import is green at spec scope after converting to one shared headed VS Code session
+- `2026-04-30` headed full-suite rerun:
+  - command: `npm run test:e2e:headed`
+  - result: pass, `95` passed in ~5.2m
+  - status impact: full headed E2E matrix is green after FileZilla shared-session simplification and headed opener/close hardening
+- `2026-04-30` regression validation:
+  - command: `npm run test:unit`
+  - result: pass, `9` suites and `51` tests passed in ~5.7s
+  - status impact: unit regression suite is green after product and harness changes
+- `2026-04-30` regression validation:
+  - command: `npm run compile`
+  - result: sandbox `spawn EPERM` on esbuild service start, then escalated pass in ~3.1s
+  - status impact: compile is green outside sandbox; the first failure matches known sandbox spawn noise
+- `2026-04-30` headless regression validation:
+  - command: `npm run test:e2e:headless`
+  - result: pass, `95` passed in ~6.5m
+  - status impact: one-worker headless E2E matrix is green after the headed stability changes
+- `2026-04-30` headless parallel regression validation:
+  - command: `npm run test:e2e:headless:4`
+  - result: pass with retry, `94` passed and `1` flaky in ~4.7m
+  - flaky test: `scripts/playwright/cancel.spec.ts:74:7` failed once in `beforeAll` setup and passed on retry
+  - status impact: four-worker headless stress path is passing but still has one startup/setup flake bucket
+- `2026-04-30` headless parallel focused reproduction:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/cancel.spec.ts`
+  - result: sandbox `spawn EPERM` before Playwright worker startup
+  - status impact: no product/test signal was collected from the sandbox attempt; this matches known environment noise and required an escalated rerun
+- `2026-04-30` headless parallel focused validation:
+  - command: `npm run test:e2e:headless:4 -- scripts/playwright/bookmarks.spec.ts scripts/playwright/cancel.spec.ts`
+  - result: pass, `13` passed in ~53.8s
+  - status impact: the remaining four-worker startup/setup flake did not reproduce on the setup-heavy subset, so the open bucket is now narrowed to low-frequency full-matrix concurrency noise rather than a deterministic cancel-spec failure
+- `2026-04-30` headless parallel full-matrix rerun:
+  - command: `npm run test:e2e:headless:4`
+  - result: pass, `95` passed in ~3.3m
+  - status impact: the full four-worker headless matrix is currently green with no retry bucket, so no reproducible headless parallel failure remains
+- `2026-04-30` final verification rerun:
+  - command: `npm run compile`
+  - result: pass in ~3.2s
+  - status impact: extension bundle and webview assets rebuild cleanly in the current tree
+- `2026-04-30` final verification rerun:
+  - command: `npm run test:unit`
+  - result: pass, `9` suites and `51` tests passed in ~6.1s
+  - status impact: unit coverage remains green after the final E2E harness/product changes
+- `2026-04-30` final verification rerun:
+  - command: `npm run test:e2e:headed`
+  - result: sandbox `spawn EPERM` before Playwright worker startup, then escalated pass with `95` passed in ~5.8m
+  - status impact: full headed E2E matrix is green on a fresh rerun; the initial sandbox failure matches known environment noise rather than a product/test regression
+- `2026-04-30` final verification rerun:
+  - command: `npm run test:e2e:headless`
+  - result: pass, `95` passed in ~6.5m
+  - status impact: full one-worker headless E2E matrix remains green on a fresh rerun
+
+- `2026-04-30` coverage-hardening focused validations:
+  - command: `npx jest src/__tests__/quickUpload.test.ts --runInBand`
+  - result: pass, `9` passed in ~1.6s
+  - status impact: Quick Upload command now has unit coverage for no-file/no-preset, picker, success, cancel, error, progress, and abort behavior
+- `2026-04-30` coverage-hardening focused validations:
+  - command: `npm run test:unit -- src/__tests__/uploadRunner.test.ts`
+  - result: pass, `7` passed in ~2.9s Jest runtime
+  - status impact: read-only drop-box upload runner behavior now covers success without remote management operations and abort without partial cleanup
+- `2026-04-30` coverage-hardening focused validations:
+  - command: `npm run test:unit -- src/__tests__/presetManager.test.ts --runInBand`
+  - result: pass, `6` passed in ~2.3s Jest runtime
+  - status impact: manually-defined settings presets are covered at unit level without adding brittle VS Code Settings UI automation
+- `2026-04-30` coverage-hardening regression validations:
+  - commands: `npm run compile`, `npm run typecheck`, `npm run test:unit`
+  - result: pass; full unit suite is now `10` suites and `63` tests
+  - status impact: TypeScript, build, and unit coverage remain green after adding coverage-hardening tests
+- `2026-04-30` coverage-hardening package validations:
+  - commands: `npm run qa:vsix:contents`, `npm run package`
+  - result: pass after fixing the contents checker to use `@vscode/vsce` in-process
+  - status impact: VSIX-owned runtime file check passes; `jest.transform.js` was removed from packaged files; production `node_modules` remains expected because `ssh2-sftp-client` is an external runtime dependency
+- `2026-04-30` coverage-hardening focused E2E:
+  - command: `npm run test:e2e:headless -- scripts/playwright/upload.spec.ts --grep "read-only drop-box"`
+  - initial result: fail, sentinel was not removed because the host-side drop watcher was not running
+  - artifact: `test-results/upload-upload-flows-read-o-07905-er-pickup-auto-removes-file/error-context.md`
+  - classification: QA fixture/test harness, not product
+  - fix: E2E helper now starts the existing QA drop watcher through `Start-QADropWatcher` and verifies sentinel deletion before product upload
+  - final result: pass, `1` passed in ~38.6s
+  - status impact: read-only drop-box E2E is green at focused scope
+- `2026-04-30` coverage-hardening affected-spec E2E:
+  - command: `npm run test:e2e:upload`
+  - result: pass, `16` passed in ~1.3m
+  - status impact: full upload spec is green after adding the read-only drop-box E2E
+- `2026-04-30` coverage-hardening full headless E2E:
+  - command: `npm run test:e2e:headless`
+  - result: pass, `96` passed in ~7.1m
+  - status impact: full one-worker headless matrix is green; E2E count increased from `95` to `96`
+- `2026-04-30` coverage-hardening full headed E2E:
+  - command: `npm run test:e2e:headed`
+  - result: fail, `85` passed, `1` failed, `10` did not run in ~9.2m
+  - failing test: `scripts/playwright/history-filter.spec.ts:73:7`
+  - artifact: `test-results/history-filter-history-fil-ec8bd-mpty-state-on-fresh-session/error-context.md`
+  - status impact: full headed matrix has an open setup flake in `addPreset()` where `#preset-form-section` stayed hidden after Manage/Add Preset; not currently classified as product behavior
+- `2026-04-30` coverage-hardening headed focused rerun:
+  - command: `npm run test:e2e:headed -- scripts/playwright/history-filter.spec.ts`
+  - result: pass, `11` passed in ~46.9s
+  - status impact: the headed `addPreset()` setup failure is fixed at focused spec scope by retrying Add Account until the form input is visible
+- `2026-04-30` coverage-hardening full headed E2E rerun:
+  - command: `npm run test:e2e:headed`
+  - result: pass, `96` passed in ~6.5m
+  - status impact: full headed matrix is green after `addPreset()` hardening
+- `2026-04-30` release-finalization feature-branch verification:
+  - commands: `npm run qa:docker:status`, `npm run typecheck`, `npm run test:unit`, `npm run compile`, `npm run qa:vsix:contents`
+  - result: pass
+  - status impact:
+    - Docker QA fixture container is currently `not-created`, so smoke validation still requires `qa:docker:start`
+    - TypeScript, unit, compile, and VSIX owned-content validation are fresh-green on the pre-version-bump `feature/v0.2.1-review` tree
+- `2026-04-30` release-finalization feature-branch verification:
+  - command: `npm run package`
+  - result: sandbox `spawn EPERM` in `esbuild` child-process startup during `vscode:prepublish`
+  - status impact: no package verdict yet from the fresh release gate; rerun required outside sandbox and should still be treated as environment noise unless the escalated run fails
+- `2026-04-30` release-finalization feature-branch verification:
+  - commands: `npm run package`, `npm run qa:docker:start`, `npm run qa:smoke:dev`, `npm run qa:smoke:vsix`
+  - result: pass after rerunning `package` outside sandbox
+  - status impact:
+    - fresh packaged artifact `sftp-zip-gun-0.2.1.vsix` built successfully
+    - isolated dev-host smoke passed with Quick Upload password/key auth
+    - isolated installed-VSIX smoke passed with Quick Upload password/key auth plus packaged-build coverage
+    - observed VS Code update/sync/mutex log noise did not affect smoke pass/fail outcome and is currently classified as environment noise
+- `2026-04-30` release-finalization versioned artifact verification:
+  - commands: `npm run qa:vsix:contents`, `npm run package`, `npm run qa:smoke:vsix`
+  - result: pass on the `0.2.2` working tree
+  - status impact:
+    - the actual bumped release artifact `sftp-zip-gun-0.2.2.vsix` built successfully
+    - isolated installed-VSIX smoke passed all `3` Quick Upload cases against the `0.2.2` package
+    - the current release candidate has fresh package-content and installed-artifact evidence, not only branch-level build/test evidence
+- `2026-04-30` pre-merge PR review hygiene:
+  - commands: review of PR `#2`, `npm run qa:vsix:contents`
+  - result: pass after removing accidental artifact `bash.exe.stackdump` and ignoring future `*.stackdump` files
+  - status impact:
+    - release branch no longer carries a stray crash dump into `develop` / `master` history
+    - package-content validation remained green after the cleanup
+    - no product behavior changed; this was repository hygiene only
+- `2026-04-30` develop post-merge verification:
+  - commands: `npm run package`, `npm run qa:docker:start`, `npm run qa:vsix:contents`, `npm run qa:smoke:vsix`
+  - result: pass on merged `develop` after correcting for fresh-checkout build-output absence and rerunning Docker access outside sandbox
+  - status impact:
+    - merged `develop` rebuilt and packaged `sftp-zip-gun-0.2.2.vsix` successfully
+    - VSIX owned-content validation passed with the required `9` runtime entries
+    - installed-VSIX smoke passed all `3` Quick Upload cases on the merged branch
+    - `develop` now has fresh post-merge release evidence and is ready to promote toward `master`

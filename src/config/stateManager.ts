@@ -6,19 +6,28 @@ const HISTORY_KEY = 'sftpZipGun.history';
 const HISTORY_CAP = 50;
 
 export class StateManager {
+  private stateCache: PanelState | undefined;
+
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   getState(): PanelState {
+    if (this.stateCache) {
+      return this.stateCache;
+    }
+
     const raw = this.context.globalState.get<PanelState>(STATE_KEY);
     if (raw !== null && typeof raw === 'object') {
-      return raw;
+      this.stateCache = raw;
+      return this.stateCache;
     }
-    return {};
+    this.stateCache = {};
+    return this.stateCache;
   }
 
   async setState(partial: Partial<PanelState>): Promise<void> {
     const current = this.getState();
     const merged: PanelState = { ...current, ...partial };
+    this.stateCache = merged;
     await this.context.globalState.update(STATE_KEY, merged);
   }
 
@@ -38,5 +47,10 @@ export class StateManager {
 
   async clearHistory(): Promise<void> {
     await this.context.globalState.update(HISTORY_KEY, []);
+  }
+
+  async clearState(): Promise<void> {
+    this.stateCache = {};
+    await this.context.globalState.update(STATE_KEY, undefined);
   }
 }

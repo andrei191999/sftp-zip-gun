@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'node',
@@ -7,6 +9,6 @@ module.exports = {
     '^vscode$': '<rootDir>/src/__mocks__/vscode.ts',
   },
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.jest.json' }],
+    '^.+\\.tsx?$': path.join(__dirname, 'jest.transform.js'),
   },
 };

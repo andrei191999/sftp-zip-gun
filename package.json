@@ -1,9 +1,10 @@
 {
   "name": "sftp-zip-gun",
   "displayName": "SFTP Zip Gun",
-  "description": "Upload files to SFTP servers without leaving VS Code. Manage presets, browse remote directories, and track upload history.",
-  "version": "0.1.0",
+  "description": "Developer-first SFTP uploads for VS Code with ZIP Canon, Pistol File, ZIP Gun, remote path bookmarks, and upload history.",
+  "version": "0.2.2",
   "publisher": "AndreiMacovei",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/andrei191999/sftp-zip-gun"
@@ -28,17 +29,61 @@
     "theme": "dark"
   },
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:sftpZipGun.openPanel",
     "onCommand:sftpZipGun.quickUpload",
     "onCommand:sftpZipGun.importFileZilla"
   ],
   "scripts": {
-    "compile": "esbuild src/extension.ts --bundle --platform=node --external:vscode --external:ssh2-sftp-client --outfile=dist/extension.js --sourcemap",
-    "watch": "npm run compile -- --watch",
+    "prepare": "npm run build:webview",
+    "build:webview": "node ./scripts/build-webview-panel.mjs",
+    "compile": "npm run build:webview && node ./scripts/build-extension.mjs",
+    "debug:prep": "npm run test:unit && npm run typecheck && npm run compile",
+    "watch": "node ./scripts/watch.mjs",
     "package": "vsce package",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "npm run compile",
-    "test": "jest"
+    "test": "jest --runInBand",
+    "test:unit": "jest --runInBand",
+    "test:integration": "node ./scripts/qa/run-vscode-smoke.js",
+    "qa:docker:start": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Start-DockerQa.ps1",
+    "qa:docker:status": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Get-DockerQaStatus.ps1",
+    "qa:docker:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Stop-DockerQa.ps1",
+    "qa:docker:purge": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Purge-DockerQa.ps1",
+    "qa:smoke:dev": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeDev.ps1",
+    "qa:smoke:vsix": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeVsix.ps1",
+    "qa:vsix:contents": "node ./scripts/qa/assert-vsix-contents.js",
+    "qa:release": "npm run typecheck && npm run test:unit && npm run compile && npm run qa:vsix:contents && npm run package",
+    "test:e2e": "node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:headed": "cross-env HEADED=1 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:headless": "cross-env HEADED=0 WORKERS=1 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:headless:2": "cross-env HEADED=0 WORKERS=2 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:headless:3": "cross-env HEADED=0 WORKERS=3 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:headless:4": "cross-env HEADED=0 WORKERS=4 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:debug": "cross-env HEADED=1 SLOW_MO=1500 HIGHLIGHT=1 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:debug:slow": "cross-env HEADED=1 SLOW_MO=3000 HIGHLIGHT=1 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:slow": "cross-env SLOW_MO=250 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:fast": "cross-env HEADED=0 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:trace": "cross-env TRACE=1 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:report": "playwright show-report playwright-report",
+    "test:e2e:parallel": "cross-env HEADED=0 WORKERS=4 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:parallel:headed": "cross-env HEADED=1 WORKERS=2 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:parallel:headed:4": "cross-env HEADED=1 WORKERS=4 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:parallel:3": "cross-env HEADED=0 WORKERS=3 node ./scripts/playwright/run-with-cleanup.mjs test",
+    "test:e2e:ui": "node ./scripts/playwright/run-with-cleanup.mjs test --ui",
+    "test:e2e:upload": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/upload.spec.ts",
+    "test:e2e:cancel": "node ./scripts/playwright/run-with-cleanup.mjs test cancel",
+    "test:e2e:transfer": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/upload.spec.ts scripts/playwright/cancel.spec.ts scripts/playwright/history.spec.ts",
+    "test:e2e:presets": "node ./scripts/playwright/run-with-cleanup.mjs test preset-crud",
+    "test:e2e:history": "node ./scripts/playwright/run-with-cleanup.mjs test history",
+    "test:e2e:state": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/ui-state.spec.ts scripts/playwright/zip-naming.spec.ts",
+    "test:e2e:openfiles": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/open-files.spec.ts",
+    "test:e2e:filezilla": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/filezilla.spec.ts",
+    "test:e2e:filters": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/history-filter.spec.ts",
+    "test:e2e:conn": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/connection.spec.ts",
+    "test:e2e:bookmarks": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/bookmarks.spec.ts",
+    "test:e2e:all": "node ./scripts/playwright/run-with-cleanup.mjs test scripts/playwright/",
+    "test:e2e:cleanup:test": "node ./scripts/playwright/helpers/orphaned-vscode.test.mjs"
   },
   "contributes": {
     "commands": [
@@ -175,6 +220,21 @@
               }
             }
           }
+        },
+        "sftpZipGun.defaultMode": {
+          "type": "string",
+          "default": "pistol_file",
+          "enum": [
+            "zip_canon",
+            "pistol_file",
+            "zip_gun"
+          ],
+          "enumDescriptions": [
+            "ZIP Canon — all files zipped into one archive",
+            "Pistol File — each file uploaded separately",
+            "ZIP Gun — files grouped into multiple zips"
+          ],
+          "description": "Upload mode used when the panel opens for the first time (before any mode has been saved)."
         }
       }
     }
@@ -185,15 +245,24 @@
     "ssh2-sftp-client": "^12.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/archiver": "^7.0.0",
-    "@types/jest": "^30.0.0",
+    "@types/jest": "^29.5.14",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^25.6.0",
     "@types/vscode": "^1.74.0",
     "@types/yauzl": "^2.10.3",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.7.1",
+    "bs-logger": "^0.2.6",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2",
     "esbuild": "^0.28.0",
-    "jest": "^30.3.0",
+    "jest": "^29.7.0",
+    "mocha": "^11.7.5",
+    "source-map": "^0.6.1",
     "ts-jest": "^29.4.9",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "yauzl": "^2.10.0"
   }
 }
