@@ -1056,3 +1056,15 @@
       - VS Code downloaded/validated `1.118.1` during this run
       - `Settings Sync` account status became `unavailable`
       - cross-app IPC / mutex warnings appeared without failing the smoke run
+- `2026-04-30` pre-merge PR review hygiene:
+  - scope: draft PR `#2` from `feature/v0.2.1-review` into `develop`
+  - review result: found one accidental repository artifact, `bash.exe.stackdump`
+  - fix:
+    - deleted tracked crash dump `bash.exe.stackdump`
+    - added `*.stackdump` to `.gitignore` to prevent recurrence
+  - verification:
+    - command: `npm run qa:vsix:contents`
+    - status: pass
+    - notes:
+      - VSIX owned-content gate still passed with `9` required runtime entries after the hygiene cleanup
+  - classification: repository/release-surface hygiene, not product behavior

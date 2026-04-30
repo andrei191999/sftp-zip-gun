@@ -479,3 +479,10 @@
     - the actual bumped release artifact `sftp-zip-gun-0.2.2.vsix` built successfully
     - isolated installed-VSIX smoke passed all `3` Quick Upload cases against the `0.2.2` package
     - the current release candidate has fresh package-content and installed-artifact evidence, not only branch-level build/test evidence
+- `2026-04-30` pre-merge PR review hygiene:
+  - commands: review of PR `#2`, `npm run qa:vsix:contents`
+  - result: pass after removing accidental artifact `bash.exe.stackdump` and ignoring future `*.stackdump` files
+  - status impact:
+    - release branch no longer carries a stray crash dump into `develop` / `master` history
+    - package-content validation remained green after the cleanup
+    - no product behavior changed; this was repository hygiene only

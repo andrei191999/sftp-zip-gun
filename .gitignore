@@ -27,6 +27,7 @@ test-fixtures/
 # Test coverage output
 coverage/
 *.log
+*.stackdump
 
 # Playwright HTML report (parallel runs)
 playwright-report/
