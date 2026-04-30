@@ -1,0 +1,354 @@
+/* ---------------------------------------------------------------------------
+   Connection status indicators (Manage view cards)
+--------------------------------------------------------------------------- */
+
+.conn-ok {
+  color: var(--vscode-testing-iconPassed);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.conn-fail {
+  display: inline-block;
+  color: var(--vscode-inputValidation-errorBorder);
+  border: 1px solid currentColor;
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  forced-color-adjust: none;   /* keep VS Code theme colors in Windows HC / forced-colors mode */
+}
+
+/* ---------------------------------------------------------------------------
+   NEW badge (freshly-added accounts, session-transient)
+--------------------------------------------------------------------------- */
+
+.badge-new {
+  color: var(--vscode-testing-iconPassed);
+  border: 1px solid var(--vscode-testing-iconPassed);
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ---------------------------------------------------------------------------
+   Log category prefix tags
+--------------------------------------------------------------------------- */
+
+.log-cat {
+  display: inline-block;
+  font-weight: 700;
+  padding: 0 4px;
+  margin-right: 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  line-height: 1.6;
+  vertical-align: middle;
+  letter-spacing: 0.03em;
+}
+
+.log-cat-upload   { color: var(--vscode-terminal-ansiBlue); }
+.log-cat-conn     { color: var(--vscode-terminal-ansiGreen); }
+.log-cat-import   { color: var(--vscode-terminal-ansiMagenta); }
+.log-cat-accounts { color: var(--vscode-terminal-ansiYellow); }
+.log-cat-sys      { color: var(--vscode-terminal-ansiCyan); }
+
+/* ---------------------------------------------------------------------------
+   File table (upload view)
+--------------------------------------------------------------------------- */
+
+.file-table-wrap {
+  overflow-y: auto;
+  max-height: 280px;   /* ~10 rows × 28px */
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+  width: 100%;
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.file-table th,
+.file-table td {
+  padding: 3px 8px;
+  text-align: left;
+}
+
+.file-table th {
+  position: sticky;
+  top: 0;
+  background-color: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--vscode-input-border);
+  font-weight: 600;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.file-table td:first-child {
+  width: 24px;
+  text-align: center;
+}
+
+.file-table tbody tr:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
+/* ---------------------------------------------------------------------------
+   Live upload progress line (log box footer, shown during transfers)
+--------------------------------------------------------------------------- */
+
+.log-progress {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   Log section — collapsible box with unified header
+--------------------------------------------------------------------------- */
+
+.log-section {
+  margin-bottom: 12px;
+}
+
+/* Single bordered container that wraps header + log box + history */
+.log-section-box {
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+}
+
+/* Header: column-flex — tab row always on top, filter row below when a tab is open */
+.log-section-header {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--vscode-input-background);
+  border-bottom: 1px solid var(--vscode-input-border);
+}
+
+/* Tab button row: both buttons split width equally */
+.log-tab-row {
+  display: flex;
+  gap: 4px;
+  padding: 3px 6px;
+}
+
+.log-tab-row button { flex: 1; }
+
+/* Filter pills row — centered, appears below tab row only when a tab is open */
+.log-filter-row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 3px;
+  border-top: 1px solid var(--vscode-input-border);
+}
+
+.log-filter-row button {
+  font-size: 0.8em;
+  padding: 1px 7px;
+}
+
+/* Separator dot between filter groups */
+.filter-sep {
+  opacity: 0.35;
+  padding: 0 2px;
+  pointer-events: none;
+}
+
+/* Log box inside the section box: no own border/radius, container handles it */
+.log-section-box .log-box {
+  border: none;
+  border-radius: 0;
+}
+
+/* History pane inside the section box — no top border (header provides separation) */
+.log-history-section {
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: var(--vscode-input-background);
+}
+
+.history-empty {
+  padding: 8px 10px;
+  opacity: 0.5;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   Structured history entry rows — overrides views-and-logs.css base rules
+--------------------------------------------------------------------------- */
+
+.history-entry {
+  display: flex;
+  align-items: center;      /* vertically center all first-row items */
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 4px 10px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--vscode-input-border);
+  font-size: 0.83em;
+  min-width: 0;
+}
+
+.history-entry:last-child { border-bottom: none; }
+
+.history-entry:hover { background-color: var(--vscode-list-hoverBackground); }
+
+.history-entry.success { border-left-color: var(--vscode-testing-iconPassed); }
+/* Explicit padding overrides the old views-and-logs.css rule (padding-left: 6px at higher specificity) */
+.history-entry.error   { border-left-color: var(--vscode-inputValidation-errorBorder); opacity: 1; padding: 4px 10px; }
+
+.hentry-status {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  font-size: 0.9em;
+}
+
+.hentry-status-success { color: var(--vscode-testing-iconPassed); }
+.hentry-status-error   { color: var(--vscode-inputValidation-errorBorder); }
+
+.hentry-ts {
+  flex-shrink: 0;
+  opacity: 0.45;
+  font-family: monospace;
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+
+.hentry-account {
+  flex-shrink: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Mode badge — same pill shape as .log-cat */
+.hentry-mode {
+  display: inline-block;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 0.72em;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  line-height: 1.6;
+  vertical-align: middle;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.hentry-mode-pistol_file { color: var(--vscode-terminal-ansiBlue); }
+.hentry-mode-zip_canon   { color: var(--vscode-terminal-ansiYellow); }
+.hentry-mode-zip_gun     { color: var(--vscode-terminal-ansiMagenta); }
+
+.hentry-files {
+  opacity: 0.55;
+  font-family: monospace;
+  font-size: 0.95em;
+}
+
+/* Remote path — always on its own line below the info row, wraps fully */
+.hentry-path {
+  width: 100%;
+  opacity: 0.55;
+  font-family: monospace;
+  font-size: 0.9em;
+  word-break: break-all;
+  padding-left: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Collapsible file source sections
+--------------------------------------------------------------------------- */
+
+.section-header {
+  margin-top: 4px;
+}
+
+.section-toggle {
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+
+.section-body {
+  padding-left: 0;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.folder-path-cell {
+  font-size: 0.8em;
+  opacity: 0.6;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Local folder button — icon + path span; path clips from left (shows end) */
+.folder-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.folder-path-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.source-file-row .hover-actions {
+  visibility: hidden;
+  width: 20px;
+}
+
+.source-file-row:hover .hover-actions {
+  visibility: visible;
+}
+
+/* Recent Files section separator inside the file table */
+.open-section-separator td {
+  padding: 0;
+  background-color: var(--vscode-editor-background);
+  border-top: 1px solid var(--vscode-input-border);
+  border-bottom: 1px solid var(--vscode-input-border);
+}
+
+.open-section-separator .section-toggle {
+  font-size: 0.8em;
+  padding: 2px 6px;
+  opacity: 0.75;
+}
+
+.hover-icon {
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1.1em;
+  padding: 0 4px;
+}
+
+.hover-icon:hover {
+  opacity: 1;
+}
+
+.hover-icon.disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
