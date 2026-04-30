@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { assertDockerRunning } from './helpers/docker-check';
-import { assertFileExists, listFiles, makeRemoteTestDir, waitFor } from './helpers/sftp-verify';
+import { assertFileExists, dropDir, ensureDropWatcherRunning, listFiles, makeRemoteTestDir, waitFor } from './helpers/sftp-verify';
 import {
   launchSharedVsCode,
   makeTestFolder,
@@ -39,6 +39,17 @@ const KEY_PRESET = {
   keyPath: KEY_PATH,
 };
 
+const DROP_PRESET = {
+  name: 'E2E Drop ReadOnly',
+  host: '127.0.0.1',
+  port: 2222,
+  username: 'pwuser',
+  remoteDir: '/drop',
+  authType: 'password' as const,
+  password: 'pwpass',
+  readOnly: true,
+};
+
 test.describe.serial('upload flows', () => {
   let shared: Awaited<ReturnType<typeof launchSharedVsCode>> | undefined;
 
@@ -47,6 +58,7 @@ test.describe.serial('upload flows', () => {
     shared = await launchSharedVsCode();
     await addPreset(shared.panel, PW_PRESET);
     await addPreset(shared.panel, KEY_PRESET);
+    await addPreset(shared.panel, DROP_PRESET);
   });
 
   test.afterAll(async () => {
@@ -100,6 +112,36 @@ test.describe.serial('upload flows', () => {
     const name = path.basename(localFile);
     await waitFor(() => listFiles(remote.hostDir).includes(name), `${name} not found in ${remote.hostDir}`);
     assertFileExists(remote.hostDir, name);
+    await waitForUploadIdle(panel);
+  });
+
+  test('read-only drop-box upload succeeds after pickup auto-removes file', async () => {
+    const { panel, workspaceDir } = session();
+    const folder = makeTestFolder(workspaceDir, 'drop-readonly');
+    const localFile = path.join(folder, `e2e-drop-${Date.now()}.txt`);
+    fs.writeFileSync(localFile, `e2e:drop:${Date.now()}`);
+    const fileName = path.basename(localFile);
+    const hostDropDir = dropDir('pwuser');
+    await ensureDropWatcherRunning('pwuser');
+
+    await selectPreset(panel, DROP_PRESET.name);
+    await selectOneTimeRemotePath(panel, '/drop');
+    await loadFolder(panel, folder);
+    await switchMode(panel, 'pistol_file');
+    await selectFile(panel, localFile);
+    await panel.click('.btn-fire');
+
+    const norm = localFile.replace(/\\/g, '/');
+    await expect(panel.locator(
+      `tr[data-filepath="${localFile}"] .file-status-cell .status-icon-done, ` +
+      `tr[data-filepath="${norm}"] .file-status-cell .status-icon-done`
+    ).first()).toBeVisible({ timeout: 45_000 });
+
+    await openLogTab(panel);
+    await panel.click('button:has-text("Upload History")');
+    await expect(panel.locator('.history-entry.success').filter({ hasText: fileName }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(panel.locator('.history-entry.success').filter({ hasText: `/drop/${fileName}` }).first()).toBeVisible({ timeout: 10_000 });
+    await waitFor(() => !listFiles(hostDropDir).includes(fileName), `${fileName} was not consumed by drop watcher`, 10_000);
     await waitForUploadIdle(panel);
   });
 

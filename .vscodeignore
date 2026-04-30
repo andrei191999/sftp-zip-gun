@@ -5,6 +5,7 @@ src/
 tsconfig.json
 tsconfig.jest.json
 jest.config.js
+jest.transform.js
 openspec/
 docs/
 spikes/
@@ -15,11 +16,20 @@ scripts/
 .vscode-test/
 .claude/
 .codex/
+.agents/
+.code-review-graph/
 .remember/
 .superpowers/
+playwright-report/
+test-results/
 
 # Internal / planning files
+.env
+.env.*
+.mcp.json
+AGENTS.md
 CLAUDE.md
+bash.exe.stackdump
 notes.md
 *.vsix
 

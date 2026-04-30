@@ -1027,13 +1027,17 @@ export async function addPreset(
     authType: 'password' | 'key';
     keyPath?: string;
     password?: string;
+    readOnly?: boolean;
   }
 ): Promise<void> {
-  await openManageTab(panel);
-  await panel.locator('button:has-text("+ Add Account")').click();
-
   const form = panel.locator('#preset-form-section');
-  await expect(form).toBeVisible({ timeout: 10_000 });
+  await expect(async () => {
+    await openManageTab(panel);
+    const addButton = panel.locator('button:has-text("+ Add Account")');
+    await expect(addButton).toBeVisible({ timeout: 2_000 });
+    await addButton.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(form.locator('input[placeholder="My Server"]')).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
 
   const nameInput = form.locator('input[placeholder="My Server"]');
   const hostInput = form.locator('input[placeholder="sftp.example.com"]');
@@ -1075,6 +1079,11 @@ export async function addPreset(
         await expect(passwordInput).toHaveValue(preset.password ?? '', { timeout: 2_000 });
       }).toPass({ timeout: 15_000 });
     }
+  }
+
+  if (preset.readOnly === true) {
+    const readOnlyInput = form.locator('label:has-text("Drop-box") input[type="checkbox"]').first();
+    await readOnlyInput.check();
   }
 
   const saveButton = form.locator('button:text-is("Save")');

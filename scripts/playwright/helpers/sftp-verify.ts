@@ -1,4 +1,5 @@
 import type { TestInfo } from '@playwright/test';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -9,6 +10,46 @@ const QA_ROOT =
 
 export function storeDir(user: 'pwuser' | 'keyuser'): string {
   return path.join(QA_ROOT, 'data', user, 'store');
+}
+
+export function dropDir(user: 'pwuser' | 'keyuser'): string {
+  return path.join(QA_ROOT, 'data', user, 'drop');
+}
+
+function psSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function startDropWatcher(): void {
+  const scriptRoot = path.join(process.cwd(), 'scripts', 'qa');
+  const commonScript = path.join(scriptRoot, 'Common.ps1');
+  const command = `. ${psSingleQuote(commonScript)}; Start-QADropWatcher -ScriptRoot ${psSingleQuote(scriptRoot)} | Out-Null`;
+
+  execFileSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+export async function ensureDropWatcherRunning(user: 'pwuser' | 'keyuser'): Promise<void> {
+  const hostDropDir = dropDir(user);
+  fs.mkdirSync(hostDropDir, { recursive: true });
+
+  const firstSentinel = path.join(hostDropDir, `sentinel-${Date.now()}-pre.txt`);
+  fs.writeFileSync(firstSentinel, 'sentinel');
+
+  try {
+    await waitFor(() => !fs.existsSync(firstSentinel), `drop watcher did not remove ${firstSentinel}`, 2_500);
+    return;
+  } catch {
+    fs.rmSync(firstSentinel, { force: true });
+  }
+
+  startDropWatcher();
+
+  const secondSentinel = path.join(hostDropDir, `sentinel-${Date.now()}-post.txt`);
+  fs.writeFileSync(secondSentinel, 'sentinel');
+  await waitFor(() => !fs.existsSync(secondSentinel), `drop watcher did not remove ${secondSentinel}`, 10_000);
 }
 
 export interface RemoteTestDir {

@@ -52,6 +52,8 @@
     "qa:docker:purge": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Purge-DockerQa.ps1",
     "qa:smoke:dev": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeDev.ps1",
     "qa:smoke:vsix": "powershell -ExecutionPolicy Bypass -File .\\scripts\\qa\\Invoke-SmokeVsix.ps1",
+    "qa:vsix:contents": "node ./scripts/qa/assert-vsix-contents.js",
+    "qa:release": "npm run typecheck && npm run test:unit && npm run compile && npm run qa:vsix:contents && npm run package",
     "test:e2e": "node ./scripts/playwright/run-with-cleanup.mjs test",
     "test:e2e:headed": "cross-env HEADED=1 node ./scripts/playwright/run-with-cleanup.mjs test",
     "test:e2e:headless": "cross-env HEADED=0 WORKERS=1 node ./scripts/playwright/run-with-cleanup.mjs test",

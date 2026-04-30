@@ -55,6 +55,45 @@ describe('PresetManager', () => {
     ]);
   });
 
+  it('normalizes and exposes presets defined in settings', () => {
+    setMockConfiguration('sftpZipGun', {
+      presets: [
+        {
+          name: 'Manual Settings Preset',
+          host: '127.0.0.1',
+          port: 2222,
+          username: 'pwuser',
+          remoteDir: '/store',
+          authType: 'password',
+          keyPath: '',
+          readOnly: false,
+        },
+      ],
+    });
+
+    const ctx = makeMockContext({
+      secrets: {
+        'sftpZipGun.preset.Manual Settings Preset.password': 'pwpass',
+      },
+    });
+    const manager = new PresetManager(ctx as any);
+
+    expect(manager.getAll()).toEqual([
+      {
+        name: 'Manual Settings Preset',
+        host: '127.0.0.1',
+        port: 2222,
+        username: 'pwuser',
+        remoteDir: '/store',
+        savedPaths: [],
+        authType: 'password',
+        keyPath: '',
+        readOnly: false,
+      },
+    ]);
+    expect(manager.getByName('Manual Settings Preset')?.name).toBe('Manual Settings Preset');
+  });
+
   it('stores non-sensitive preset metadata and normalizes readOnly on save', async () => {
     const ctx = makeMockContext();
     const manager = new PresetManager(ctx as any);

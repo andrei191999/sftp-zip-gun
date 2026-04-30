@@ -58,11 +58,35 @@ const outputChannel = {
   dispose: jest.fn(),
 };
 
+export const ProgressLocation = {
+  Notification: 15,
+};
+
+const progressReports: unknown[] = [];
+let cancellationCallback: (() => void) | undefined;
+
+const mockProgress = {
+  report: jest.fn((value: unknown) => {
+    progressReports.push(value);
+  }),
+};
+
+const mockCancellationToken = {
+  onCancellationRequested: jest.fn((callback: () => void) => {
+    cancellationCallback = callback;
+    return makeDisposable();
+  }),
+};
+
 export const window = {
   createOutputChannel: jest.fn(() => outputChannel),
   showInformationMessage: jest.fn(),
   showWarningMessage: jest.fn(),
   showErrorMessage: jest.fn(),
+  showQuickPick: jest.fn(),
+  withProgress: jest.fn((_options: unknown, task: (progress: typeof mockProgress, token: typeof mockCancellationToken) => unknown) =>
+    Promise.resolve(task(mockProgress, mockCancellationToken))
+  ),
   activeTextEditor: undefined,
 };
 
@@ -81,7 +105,21 @@ export function resetMockWindow(): void {
   window.showInformationMessage.mockClear();
   window.showWarningMessage.mockClear();
   window.showErrorMessage.mockClear();
+  window.showQuickPick.mockReset();
+  window.withProgress.mockClear();
+  mockProgress.report.mockClear();
+  mockCancellationToken.onCancellationRequested.mockClear();
+  progressReports.length = 0;
+  cancellationCallback = undefined;
   window.activeTextEditor = undefined;
+}
+
+export function getMockProgressReports(): unknown[] {
+  return [...progressReports];
+}
+
+export function triggerMockCancellation(): void {
+  cancellationCallback?.();
 }
 
 export function resetRegisteredCommands(): void {

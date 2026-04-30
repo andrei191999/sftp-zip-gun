@@ -266,4 +266,103 @@ describe('runUploadRunner', () => {
     expect(deleteFile).toHaveBeenCalledTimes(2);
     expect(deleteFile).toHaveBeenCalledWith('/upload/invoice.xml');
   });
+
+  it('skips partial remote cleanup on abort for read-only presets', async () => {
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const disconnect = jest.fn().mockResolvedValue(undefined);
+    const deleteFile = jest.fn().mockResolvedValue(undefined);
+    const addToHistory = jest.fn().mockResolvedValue(undefined);
+    const setState = jest.fn().mockResolvedValue(undefined);
+
+    const result = await runUploadRunner({
+      preset: { ...BASE_PRESET, remoteDir: '/drop', readOnly: true },
+      connectOptions: {
+        host: BASE_PRESET.host,
+        port: BASE_PRESET.port,
+        username: BASE_PRESET.username,
+        password: 'pw',
+      },
+      request: {
+        mode: 'pistol_file',
+        presetName: BASE_PRESET.name,
+        selectedPaths: ['/drop'],
+        files: ['C:/tmp/invoice.xml'],
+      },
+      transport: {
+        connect,
+        uploadFile: jest.fn().mockRejectedValue(Object.assign(new Error('Upload aborted by user'), { name: 'AbortError' })),
+        disconnect,
+        deleteFile,
+        abort: jest.fn(),
+        forceAbort: jest.fn(),
+        listDirectory: jest.fn(),
+        isAborted: false,
+      },
+      stateManager: { addToHistory, setState },
+      zipBuilder: jest.fn(),
+      now: () => new Date('2026-04-30T10:00:00.000Z'),
+      createId: () => 'history-readonly-cancel',
+      onProgress: jest.fn(),
+    });
+
+    expect(result.status).toBe('cancelled');
+    expect(result.errorMessage).toBe('Upload cancelled.');
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(deleteFile).not.toHaveBeenCalled();
+    expect(addToHistory).not.toHaveBeenCalled();
+    expect(setState).not.toHaveBeenCalled();
+  });
+
+  it('uploads to a read-only preset without remote management operations', async () => {
+    const addToHistory = jest.fn().mockResolvedValue(undefined);
+    const setState = jest.fn().mockResolvedValue(undefined);
+    const deleteFile = jest.fn().mockResolvedValue(undefined);
+    const listDirectory = jest.fn().mockResolvedValue([]);
+
+    const result = await runUploadRunner({
+      preset: { ...BASE_PRESET, remoteDir: '/drop', readOnly: true },
+      connectOptions: {
+        host: BASE_PRESET.host,
+        port: BASE_PRESET.port,
+        username: BASE_PRESET.username,
+        password: 'pw',
+      },
+      request: {
+        mode: 'pistol_file',
+        presetName: BASE_PRESET.name,
+        selectedPaths: [],
+        files: ['C:/tmp/invoice.xml'],
+      },
+      transport: {
+        connect: jest.fn().mockResolvedValue(undefined),
+        uploadFile: jest.fn().mockResolvedValue({
+          remoteFile: '/drop/invoice.xml',
+          bytesTransferred: 42,
+          durationMs: 15,
+        }),
+        disconnect: jest.fn().mockResolvedValue(undefined),
+        deleteFile,
+        abort: jest.fn(),
+        forceAbort: jest.fn(),
+        listDirectory,
+        isAborted: false,
+      },
+      stateManager: { addToHistory, setState },
+      zipBuilder: jest.fn(),
+      now: () => new Date('2026-04-30T10:00:00.000Z'),
+      createId: () => 'history-readonly-success',
+      onProgress: jest.fn(),
+    });
+
+    expect(result.status).toBe('success');
+    expect(deleteFile).not.toHaveBeenCalled();
+    expect(listDirectory).not.toHaveBeenCalled();
+    expect(addToHistory).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'history-readonly-success',
+      result: 'success',
+      remoteFile: '/drop/invoice.xml',
+    }));
+    expect(setState).toHaveBeenCalledWith({ lastPresetName: BASE_PRESET.name });
+  });
 });
