@@ -180,6 +180,7 @@ window.addEventListener('message', function (event) {
 
     case 'remoteDirListed': {
       var p = msg.payload;
+      if (!state.remoteBrowse || state.remoteBrowse.path !== p.path) { break; }
       state.remoteBrowse = { path: p.path, entries: p.entries, loading: false };
       break;
     }

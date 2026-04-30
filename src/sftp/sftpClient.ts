@@ -9,7 +9,10 @@ export interface ConnectOptions {
   password?: string;
   privateKey?: Buffer;
   passphrase?: string;
+  readyTimeout?: number;
 }
+
+const SSH_READY_TIMEOUT_MS = 60_000;
 
 export class AbortError extends Error {
   constructor() {
@@ -34,6 +37,7 @@ export class SftpClient {
       host: options.host,
       port: options.port,
       username: options.username,
+      readyTimeout: SSH_READY_TIMEOUT_MS,
     };
 
     if (options.privateKey !== undefined) {

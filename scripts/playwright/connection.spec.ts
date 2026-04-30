@@ -259,11 +259,14 @@ test.describe.serial('connection and preset management', () => {
     await panel.click('.preset-card:has-text("Conn New Badge") button:has-text("Edit")');
 
     // Rename the preset to confirm save is required to clear the badge
-    const nameField = panel.locator('.row:has(label:text-is("Name")) input');
-    await nameField.clear();
+    const form = panel.locator('#preset-form-section');
+    await expect(form).toBeVisible({ timeout: 10_000 });
+    const nameField = form.locator('.row:has(label:text-is("Name")) input');
+    await expect(nameField).toHaveValue('Conn New Badge', { timeout: 10_000 });
     await nameField.fill('Conn New Badge 2');
+    await expect(nameField).toHaveValue('Conn New Badge 2', { timeout: 5_000 });
 
-    await panel.click('#preset-form-section button:has-text("Save")');
+    await form.locator('button:has-text("Save")').evaluate((button: HTMLButtonElement) => button.click());
     await panel.waitForSelector('.preset-card:has-text("Conn New Badge 2")', { timeout: 30_000 });
 
     // Ensure the renamed card has no .badge-new

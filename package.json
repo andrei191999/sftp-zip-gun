@@ -29,6 +29,7 @@
     "theme": "dark"
   },
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:sftpZipGun.openPanel",
     "onCommand:sftpZipGun.quickUpload",
     "onCommand:sftpZipGun.importFileZilla"

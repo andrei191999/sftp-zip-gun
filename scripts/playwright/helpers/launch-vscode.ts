@@ -10,6 +10,10 @@ type UploadMode = 'pistol_file' | 'zip_canon' | 'zip_gun';
 type PanelView = 'manage' | 'transfer';
 const VSCODE_CLOSE_TIMEOUT_MS = 15_000;
 const VSCODE_FORCE_KILL_WAIT_MS = 5_000;
+const VSCODE_LAUNCH_LOCK_TIMEOUT_MS = 180_000;
+const VSCODE_LAUNCH_LOCK_STALE_MS = 240_000;
+const VSCODE_LAUNCH_LOCK_PATH = path.join(os.tmpdir(), 'sftp-e2e-vscode-launch.lock');
+const MIN_HEADED_TILE_WIDTH = 480;
 
 function isHeadedRun(): boolean {
   return process.env.HEADED !== '0';
@@ -17,6 +21,17 @@ function isHeadedRun(): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeLogText(value: unknown): string {
+  if (value === null || value === undefined) return '<none>';
+  if (typeof value === 'string') return value.trim() || '<empty>';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -40,6 +55,62 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boole
     await sleep(200);
   }
   return !isProcessAlive(pid);
+}
+
+function safePageLabel(page: Page): string {
+  try {
+    return page.url() || '<no-url>';
+  } catch {
+    return '<detached-page>';
+  }
+}
+
+function safeFrameLabel(frame: Frame): string {
+  try {
+    return frame.url() || '<no-url>';
+  } catch {
+    return '<detached-frame>';
+  }
+}
+
+async function acquireVsCodeLaunchLock(): Promise<() => void> {
+  const deadline = Date.now() + VSCODE_LAUNCH_LOCK_TIMEOUT_MS;
+  let fd: number | undefined;
+
+  while (Date.now() < deadline) {
+    try {
+      fd = fs.openSync(VSCODE_LAUNCH_LOCK_PATH, 'wx');
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }));
+      return () => {
+        if (fd !== undefined) {
+          try { fs.closeSync(fd); } catch { /* ignore */ }
+          fd = undefined;
+        }
+        try { fs.rmSync(VSCODE_LAUNCH_LOCK_PATH, { force: true }); } catch { /* ignore */ }
+      };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+
+      try {
+        const raw = fs.readFileSync(VSCODE_LAUNCH_LOCK_PATH, 'utf8');
+        const parsed = JSON.parse(raw) as { createdAt?: number };
+        const createdAt = Number(parsed.createdAt);
+        if (createdAt > 0 && Date.now() - createdAt > VSCODE_LAUNCH_LOCK_STALE_MS) {
+          fs.rmSync(VSCODE_LAUNCH_LOCK_PATH, { force: true });
+          continue;
+        }
+      } catch {
+        try { fs.rmSync(VSCODE_LAUNCH_LOCK_PATH, { force: true }); } catch { /* ignore */ }
+      }
+
+      await sleep(250);
+    }
+  }
+
+  throw new Error(`Timed out waiting for VS Code launch lock at ${VSCODE_LAUNCH_LOCK_PATH}`);
 }
 
 function forceKillProcessTree(pid: number): void {
@@ -106,12 +177,17 @@ function getVsCodeLaunchArgs(extensionRoot: string, userDataDir: string, workspa
   const args = [
     `--extensionDevelopmentPath=${extensionRoot}`,
     '--disable-updates',
+    '--disable-extensions',
     '--no-sandbox',
     '--disable-extension=googlecloudtools.cloudcode',
     '--disable-extension=google.geminicodeassist',
+    '--disable-extension=google.gemini-cli-vscode-ide-companion',
+    '--disable-extension=anthropic.claude-code',
     '--disable-extension=ms-toolsai.jupyter',
     '--disable-extension=GitHub.copilot',
     '--disable-extension=GitHub.copilot-chat',
+    '--disable-extension=vscode.github-authentication',
+    '--disable-extension=vscode.microsoft-authentication',
     `--user-data-dir=${userDataDir}`,
   ];
 
@@ -128,6 +204,16 @@ function getVsCodeLaunchArgs(extensionRoot: string, userDataDir: string, workspa
 
 export function isPageTarget(target: PanelTarget): target is Page {
   return typeof (target as Page).frames === 'function';
+}
+
+function getPanelOwnerPage(target?: PanelTarget): Page | undefined {
+  if (!target) return undefined;
+  if (isPageTarget(target)) return target;
+  try {
+    return target.page();
+  } catch {
+    return undefined;
+  }
 }
 
 export async function findWorkbenchWindow(
@@ -198,13 +284,6 @@ async function findVisiblePanelTarget(
   return undefined;
 }
 
-function collectExistingPanelTargets(app: ElectronApplication, workbenchWindow: Page): PanelTarget[] {
-  return [
-    ...app.windows().filter(window => window !== workbenchWindow),
-    ...workbenchWindow.frames(),
-  ];
-}
-
 async function isPanelTargetReady(target: PanelTarget): Promise<boolean> {
   const appRoot = target.locator('#app').first();
   if ((await appRoot.count()) === 0) return false;
@@ -224,7 +303,11 @@ async function triggerOpenPanelFromStatusBar(workbenchWindow: Page, timeoutMs = 
       .first();
     try {
       if (await statusBarCommand.count() > 0) {
-        await statusBarCommand.evaluate((button: HTMLElement) => button.click());
+        try {
+          await statusBarCommand.click({ force: true, timeout: 1_500 });
+        } catch {
+          await statusBarCommand.evaluate((button: HTMLElement) => button.click());
+        }
         return true;
       }
     } catch {
@@ -239,11 +322,212 @@ async function triggerOpenPanelFromStatusBar(workbenchWindow: Page, timeoutMs = 
   }
 }
 
+async function triggerOpenPanelFromKeybinding(workbenchWindow: Page): Promise<void> {
+  await workbenchWindow.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+U' : 'Control+Shift+U');
+}
+
 async function triggerOpenPanelFromCommandPalette(workbenchWindow: Page): Promise<void> {
+  await workbenchWindow.bringToFront();
+  await workbenchWindow.keyboard.press('Escape').catch(() => {});
+  await dismissWorkbenchNoise(workbenchWindow);
   await workbenchWindow.keyboard.press('Control+Shift+P');
-  await workbenchWindow.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-  await workbenchWindow.keyboard.type('Open Upload Panel');
+  const widget = workbenchWindow.locator('.quick-input-widget').first();
+  try {
+    await widget.waitFor({ timeout: 10_000 });
+  } catch {
+    await workbenchWindow.keyboard.press('F1');
+    await widget.waitFor({ timeout: 10_000 });
+  }
+  const input = widget.locator('input').first();
+  await expect(input).toBeVisible({ timeout: 5_000 });
+
+  const queries = ['SFTP Zip Gun: Open Upload Panel', 'Open Upload Panel'];
+  let matched = false;
+  for (const query of queries) {
+    await input.fill(query);
+    const result = workbenchWindow.locator(`.quick-input-list .monaco-list-row:has-text("${query}")`).first();
+    try {
+      await expect(result).toBeVisible({ timeout: 8_000 });
+      matched = true;
+      break;
+    } catch {
+      // Try the shorter contributed command label before failing.
+    }
+  }
+
+  if (!matched) {
+    throw new Error('SFTP Zip Gun command-palette result not found');
+  }
   await workbenchWindow.keyboard.press('Enter');
+}
+
+async function dismissWorkbenchNoise(workbenchWindow: Page): Promise<void> {
+  const dismissible = [
+    '.notification-toast .codicon-notifications-clear',
+    '.notification-toast .codicon-close',
+    '.notifications-toasts .monaco-action-bar .codicon-close',
+    '.monaco-dialog-box .dialog-buttons button:has-text("Cancel")',
+    '.monaco-dialog-box .dialog-buttons button:has-text("No")',
+    '.monaco-dialog-box .dialog-buttons button:has-text("Not Now")',
+    '.monaco-dialog-box .dialog-buttons button:has-text("Later")',
+  ];
+
+  for (const selector of dismissible) {
+    const target = workbenchWindow.locator(selector).first();
+    try {
+      if (await target.count() > 0 && await target.isVisible()) {
+        await target.click({ force: true, timeout: 500 });
+      }
+    } catch {
+      // Non-fatal: best-effort cleanup before command palette opening.
+    }
+  }
+}
+
+async function getActiveEditorTabLabels(window: Page): Promise<string[]> {
+  try {
+    return await window.evaluate(() => {
+      const selectors = [
+        '.tabs-container .tab.active',
+        '.editor-group-container .tab.active',
+        '.editor-group-container .tabs-container .tab.active',
+      ];
+      const seen = new Set<string>();
+      for (const selector of selectors) {
+        for (const node of document.querySelectorAll(selector)) {
+          const label = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
+          if (label) seen.add(label);
+        }
+      }
+      return Array.from(seen);
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function getStatusBarVisible(window: Page): Promise<boolean | 'unknown'> {
+  try {
+    const statusBar = window.locator('.statusbar').first();
+    if (await statusBar.count() === 0) return false;
+    return await statusBar.isVisible();
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function getSftpStatusCommandVisible(window: Page): Promise<boolean | 'unknown'> {
+  try {
+    const statusBarCommand = window
+      .getByRole('button', { name: /SFTP Zip Gun.*click to open panel/ })
+      .first();
+    if (await statusBarCommand.count() === 0) return false;
+    return await statusBarCommand.isVisible();
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function getCommandPaletteSnapshot(window: Page): Promise<{
+  widgetVisible: boolean | 'unknown';
+  resultVisible: boolean | 'unknown';
+  resultCount: number | 'unknown';
+}> {
+  try {
+    const widget = window.locator('.quick-input-widget').first();
+    const widgetVisible = await widget.count() > 0 ? await widget.isVisible() : false;
+    const result = window.locator('.quick-input-list .monaco-list-row:has-text("SFTP Zip Gun: Open Upload Panel")').first();
+    const resultCount = await result.count();
+    const resultVisible = resultCount > 0 ? await result.isVisible() : false;
+    return { widgetVisible, resultVisible, resultCount };
+  } catch {
+    return { widgetVisible: 'unknown', resultVisible: 'unknown', resultCount: 'unknown' };
+  }
+}
+
+async function getFrameHasApp(frame: Frame): Promise<boolean | 'unknown'> {
+  try {
+    return (await frame.locator('#app').count()) > 0;
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function getFrameAppVisible(frame: Frame): Promise<boolean | 'unknown'> {
+  try {
+    const appRoot = frame.locator('#app').first();
+    if (await appRoot.count() === 0) return false;
+    return await appRoot.isVisible();
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function collectPanelDiagnostics(
+  app: ElectronApplication,
+  workbenchWindow: Page,
+  extra?: Record<string, unknown>
+): Promise<string> {
+  const lines: string[] = [];
+  lines.push(`headed=${isHeadedRun()}`);
+
+  try {
+    lines.push(`app.windows=${app.windows().length}`);
+  } catch (error) {
+    lines.push(`app.windows=error:${normalizeLogText(error)}`);
+  }
+
+  lines.push(`workbench=${safePageLabel(workbenchWindow)}`);
+  lines.push(`active.editor.tabs=${normalizeLogText(await getActiveEditorTabLabels(workbenchWindow))}`);
+  lines.push(`status.bar.visible=${normalizeLogText(await getStatusBarVisible(workbenchWindow))}`);
+  lines.push(`sftp.status.command.visible=${normalizeLogText(await getSftpStatusCommandVisible(workbenchWindow))}`);
+
+  const palette = await getCommandPaletteSnapshot(workbenchWindow);
+  lines.push(`command.palette.widget.visible=${normalizeLogText(palette.widgetVisible)}`);
+  lines.push(`command.palette.result.visible=${normalizeLogText(palette.resultVisible)}`);
+  lines.push(`command.palette.result.count=${normalizeLogText(palette.resultCount)}`);
+
+  const windows = app.windows();
+  lines.push(`window.count=${windows.length}`);
+  for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {
+    const page = windows[windowIndex];
+    try {
+      lines.push(`window[${windowIndex}].url=${safePageLabel(page)}`);
+      const frames = page.frames();
+      lines.push(`window[${windowIndex}].frames=${frames.length}`);
+      for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+        const frame = frames[frameIndex];
+        const hasApp = await getFrameHasApp(frame);
+        const appVisible = hasApp === true ? await getFrameAppVisible(frame) : 'n/a';
+        lines.push(
+          `window[${windowIndex}].frame[${frameIndex}].name=${normalizeLogText(frame.name())} ` +
+          `url=${safeFrameLabel(frame)} hasApp=${normalizeLogText(hasApp)} appVisible=${normalizeLogText(appVisible)}`
+        );
+      }
+    } catch (error) {
+      lines.push(`window[${windowIndex}]=error:${normalizeLogText(error)}`);
+    }
+  }
+
+  if (extra) {
+    for (const [key, value] of Object.entries(extra)) {
+      lines.push(`${key}=${normalizeLogText(value)}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+async function logHeadedPanelDiagnostics(
+  app: ElectronApplication,
+  workbenchWindow: Page,
+  reason: string,
+  extra?: Record<string, unknown>
+): Promise<string> {
+  const diagnostics = await collectPanelDiagnostics(app, workbenchWindow, extra);
+  const message = `[launch-vscode] ${reason}\n${diagnostics}`;
+  console.error(message);
+  return message;
 }
 
 interface Tile { x: number; y: number; w: number; h: number }
@@ -255,14 +539,16 @@ function getScreenSize(): { width: number; height: number } {
 
   if (process.platform === 'win32') {
     try {
-      const out = execFileSync(
-        'wmic',
-        ['path', 'Win32_VideoController', 'get',
-          'CurrentHorizontalResolution,CurrentVerticalResolution', '/format:value'],
-        { encoding: 'utf8' }
-      );
-      const w = Number(out.match(/CurrentHorizontalResolution=(\d+)/)?.[1]);
-      const h = Number(out.match(/CurrentVerticalResolution=(\d+)/)?.[1]);
+      const script = [
+        'Add-Type -AssemblyName System.Windows.Forms;',
+        '$screen = [System.Windows.Forms.Screen]::PrimaryScreen;',
+        '$bounds = $screen.WorkingArea;',
+        'Write-Output ("{0}x{1}" -f $bounds.Width, $bounds.Height);',
+      ].join(' ');
+      const out = execFileSync('powershell', ['-NoProfile', '-Command', script], { encoding: 'utf8' }).trim();
+      const match = out.match(/(\d+)x(\d+)/);
+      const w = Number(match?.[1]);
+      const h = Number(match?.[2]);
       if (w > 0 && h > 0) return { width: w, height: h };
     } catch { /* fall through */ }
   }
@@ -271,20 +557,23 @@ function getScreenSize(): { width: number; height: number } {
 
 function computeTile(idx: number, count: number, screen: { width: number; height: number }): Tile | undefined {
   if (count <= 1 || idx < 0 || idx >= count) return undefined;
-  const { width, height } = screen;
-  if (count === 2) {
-    const w = Math.floor(width / 2);
-    return { x: idx * w, y: 0, w, h: height };
+  const width = Math.max(1, Math.floor(screen.width));
+  const height = Math.max(1, Math.floor(screen.height));
+
+  // 4+ workers use the first four visible slots; additional workers stack on
+  // those slots because a headed run cannot display more without overlap.
+  const visibleSlots = Math.min(count, 4);
+  let cols = count <= 3 ? count : 2;
+  if (Math.floor(width / cols) < MIN_HEADED_TILE_WIDTH) {
+    cols = 1;
   }
-  if (count === 3) {
-    const w = Math.floor(width / 3);
-    return { x: idx * w, y: 0, w, h: height };
-  }
-  // 4+ → 2×2 grid (extra workers stack on slot 0..3)
-  const slot = idx % 4;
-  const col = slot % 2, row = Math.floor(slot / 2);
-  const w = Math.floor(width / 2), h = Math.floor(height / 2);
-  return { x: col * w, y: row * h, w, h };
+  const rows = Math.ceil(visibleSlots / cols);
+  const slot = idx % visibleSlots;
+  const col = slot % cols, row = Math.floor(slot / cols);
+  const w = Math.max(1, Math.floor(width / cols)), h = Math.max(1, Math.floor(height / rows));
+  const x = Math.min(col * w, Math.max(0, width - 1));
+  const y = Math.min(row * h, Math.max(0, height - 1));
+  return { x, y, w: Math.min(w, width - x), h: Math.min(h, height - y) };
 }
 
 /** Resolves the VS Code Electron executable path on Windows. */
@@ -358,6 +647,10 @@ export async function launchVsCode(): Promise<{
     'security.workspace.trust.enabled': false,
     'workbench.startupEditor': 'none',
     'extensions.ignoreRecommendations': true,
+    'workbench.accounts.showAccounts': false,
+    'workbench.activityBar.showAccounts': false,
+    'workbench.activityBar.showGlobalSearch': false,
+    'settingsSync.enableNaturalLanguageSearch': false,
   }));
 
   const args = getVsCodeLaunchArgs(extensionRoot, userDataDir, workspaceDir);
@@ -417,6 +710,7 @@ export async function launchSharedVsCode(): Promise<{
   mainWindow: Page;
   panel: PanelTarget;
 }> {
+  const releaseLaunchLock = await acquireVsCodeLaunchLock();
   const { app, cleanup, workspaceDir } = await launchVsCode();
   try {
     const initialWindow = await app.firstWindow();
@@ -431,6 +725,8 @@ export async function launchSharedVsCode(): Promise<{
     try { await app.close(); } catch { /* ignore */ }
     cleanup();
     throw error;
+  } finally {
+    releaseLaunchLock();
   }
 }
 
@@ -495,6 +791,7 @@ export async function openPanelAndFindWebview(
   excludedTargets: PanelTarget[] = []
 ): Promise<Frame | Page> {
   const workbenchWindow = await findWorkbenchWindow(app, mainWindow);
+  const openerTrace: string[] = [];
 
   // Wait for VS Code to settle before opening the command palette so
   // startup notifications don't steal focus from the palette input.
@@ -502,37 +799,58 @@ export async function openPanelAndFindWebview(
   await new Promise(r => setTimeout(r, isHeadedRun() ? 1_500 : 3_000));
 
   for (let attempt = 0; attempt < 2; attempt++) {
+    await workbenchWindow.bringToFront();
     const statusTriggered = await triggerOpenPanelFromStatusBar(
       workbenchWindow,
       attempt === 0 ? (isHeadedRun() ? 5_000 : 12_000) : (isHeadedRun() ? 2_000 : 6_000)
     );
+    openerTrace.push(`attempt:${attempt}:statusBar:triggered=${statusTriggered}`);
     const statusPanel = await findVisiblePanelTarget(
       app,
       workbenchWindow,
       statusTriggered ? 12_000 : 2_000,
       excludedTargets
     );
-    if (statusPanel) return statusPanel;
+    if (statusPanel) {
+      openerTrace.push(`attempt:${attempt}:statusBar:ready=true`);
+      return statusPanel;
+    }
+    openerTrace.push(`attempt:${attempt}:statusBar:ready=false`);
+
+    try {
+      await triggerOpenPanelFromKeybinding(workbenchWindow);
+      openerTrace.push(`attempt:${attempt}:keybinding:triggered=true`);
+      const keybindingPanel = await findVisiblePanelTarget(
+        app,
+        workbenchWindow,
+        isHeadedRun() ? 10_000 : 15_000,
+        excludedTargets
+      );
+      if (keybindingPanel) {
+        openerTrace.push(`attempt:${attempt}:keybinding:ready=true`);
+        return keybindingPanel;
+      }
+      openerTrace.push(`attempt:${attempt}:keybinding:ready=false`);
+    } catch (error) {
+      openerTrace.push(`attempt:${attempt}:keybinding:error=${normalizeLogText(error)}`);
+    }
 
     try {
       await triggerOpenPanelFromCommandPalette(workbenchWindow);
+      openerTrace.push(`attempt:${attempt}:commandPalette:triggered=true`);
       const commandPanel = await findVisiblePanelTarget(
         app,
         workbenchWindow,
         isHeadedRun() ? 20_000 : 30_000 + attempt * 15_000,
         excludedTargets
       );
-      if (commandPanel) return commandPanel;
-    } catch { /* retry status bar below */ }
-
-    if (await triggerOpenPanelFromStatusBar(workbenchWindow, isHeadedRun() ? 1_500 : 4_000)) {
-      const retryPanel = await findVisiblePanelTarget(
-        app,
-        workbenchWindow,
-        12_000 + attempt * 5_000,
-        excludedTargets
-      );
-      if (retryPanel) return retryPanel;
+      if (commandPanel) {
+        openerTrace.push(`attempt:${attempt}:commandPalette:ready=true`);
+        return commandPanel;
+      }
+      openerTrace.push(`attempt:${attempt}:commandPalette:ready=false`);
+    } catch (error) {
+      openerTrace.push(`attempt:${attempt}:commandPalette:error=${normalizeLogText(error)}`);
     }
 
     if (attempt === 0) {
@@ -540,7 +858,16 @@ export async function openPanelAndFindWebview(
     }
   }
 
-  throw new Error('SFTP Zip Gun webview (ready panel with #app and tabs) not found within launch timeout');
+  const diagnostics = isHeadedRun()
+    ? await logHeadedPanelDiagnostics(app, workbenchWindow, 'panel open failed', {
+      openerTrace,
+      excludedTargets: excludedTargets.length,
+    })
+    : undefined;
+  throw new Error(
+    'SFTP Zip Gun webview (ready panel with #app and tabs) not found within launch timeout' +
+    (diagnostics ? `\n${diagnostics}` : '')
+  );
 }
 
 async function waitForPanelTargetToDisappear(target: PanelTarget, timeoutMs: number): Promise<void> {
@@ -560,6 +887,40 @@ async function waitForPanelTargetToDisappear(target: PanelTarget, timeoutMs: num
 
     await new Promise(r => setTimeout(r, 200));
   }
+
+  throw new Error(`Panel target did not disappear within ${timeoutMs}ms`);
+}
+
+async function tryClosePanelViaTabChrome(window: Page): Promise<boolean> {
+  const tab = window
+    .locator('.tabs-container .tab.active:has-text("SFTP Zip Gun"), .editor-group-container .tab.active:has-text("SFTP Zip Gun")')
+    .first();
+  try {
+    if (await tab.count() === 0 || !(await tab.isVisible())) {
+      return false;
+    }
+
+    await tab.hover({ force: true, timeout: 2_000 }).catch(() => {});
+    const closeButton = tab.locator([
+      'button[aria-label*="Close"]',
+      'button[title*="Close"]',
+      '.monaco-action-bar .action-label.codicon-close',
+      '.action-label.codicon-close',
+      '.codicon-close',
+    ].join(', ')).first();
+    if (await closeButton.count() === 0 || !(await closeButton.isVisible())) {
+      return false;
+    }
+
+    try {
+      await closeButton.click({ force: true, timeout: 2_000 });
+    } catch {
+      await closeButton.evaluate((button: HTMLElement) => button.click());
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function closeAndReopenPanel(
@@ -568,19 +929,48 @@ export async function closeAndReopenPanel(
   previousPanel?: PanelTarget
 ): Promise<{ mainWindow: Page; panel: PanelTarget }> {
   let workbenchWindow: Page | undefined;
-  let excludedTargets: PanelTarget[] = previousPanel ? [previousPanel] : [];
+  let closeMethod = 'not-attempted';
   for (let attempt = 0; attempt < 3; attempt++) {
     workbenchWindow = await findWorkbenchWindow(app, attempt === 0 ? mainWindow : undefined);
-    excludedTargets = Array.from(new Set([
-      ...excludedTargets,
-      ...collectExistingPanelTargets(app, workbenchWindow),
-    ]));
+    const ownerPage = getPanelOwnerPage(previousPanel);
+    if (ownerPage && !ownerPage.isClosed()) {
+      await ownerPage.bringToFront().catch(() => {});
+      workbenchWindow = await findWorkbenchWindow(app, ownerPage);
+    } else {
+      await workbenchWindow.bringToFront().catch(() => {});
+    }
     try {
-      await workbenchWindow.keyboard.press('Control+W');
+      const closedViaTab = await tryClosePanelViaTabChrome(workbenchWindow);
+      if (!closedViaTab) {
+        const activeTabs = await getActiveEditorTabLabels(workbenchWindow);
+        if (!activeTabs.some(label => /SFTP Zip Gun/i.test(label))) {
+          const diagnostics = isHeadedRun()
+            ? await logHeadedPanelDiagnostics(app, workbenchWindow, 'panel close refused: SFTP tab not active', {
+              previousPanelPresent: Boolean(previousPanel),
+              activeTabs,
+            })
+            : '';
+          throw new Error(
+            'Refusing to use keyboard close because the active editor is not the SFTP Zip Gun panel' +
+            (diagnostics ? `\n${diagnostics}` : '')
+          );
+        }
+        await workbenchWindow.keyboard.press(process.platform === 'darwin' ? 'Meta+W' : 'Control+W');
+        closeMethod = 'keyboard';
+      } else {
+        closeMethod = 'tab-close-button';
+      }
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/Target page, context or browser has been closed/.test(message) || attempt === 2) {
+        if (isHeadedRun()) {
+          const diagnostics = await logHeadedPanelDiagnostics(app, workbenchWindow, 'panel close failed', {
+            previousPanelPresent: Boolean(previousPanel),
+            closeMethod,
+          });
+          throw new Error(`${message}\n${diagnostics}`);
+        }
         throw error;
       }
       await new Promise(r => setTimeout(r, 300));
@@ -591,13 +981,35 @@ export async function closeAndReopenPanel(
     throw new Error('VS Code workbench window not found before panel close');
   }
   if (previousPanel) {
-    await waitForPanelTargetToDisappear(previousPanel, 10_000).catch(() => {});
+    await waitForPanelTargetToDisappear(previousPanel, 10_000);
+    if (isHeadedRun()) {
+      console.error(`[launch-vscode] panel close verified closeMethod=${closeMethod}`);
+    }
+  } else {
+    const visiblePanel = await findVisiblePanelTarget(app, workbenchWindow, 2_000);
+    if (visiblePanel) {
+      await waitForPanelTargetToDisappear(visiblePanel, 10_000);
+      if (isHeadedRun()) {
+        console.error(`[launch-vscode] panel close verified closeMethod=${closeMethod}`);
+      }
+    }
   }
   await new Promise(r => setTimeout(r, isHeadedRun() ? 800 : 1_500));
 
   const currentWorkbench = await findWorkbenchWindow(app, workbenchWindow);
-  const panel = await openPanelAndFindWebview(app, currentWorkbench, excludedTargets);
-  return { mainWindow: await findWorkbenchWindow(app, currentWorkbench), panel };
+  try {
+    const panel = await openPanelAndFindWebview(app, currentWorkbench);
+    return { mainWindow: await findWorkbenchWindow(app, currentWorkbench), panel };
+  } catch (error) {
+    if (isHeadedRun()) {
+      const diagnostics = await logHeadedPanelDiagnostics(app, currentWorkbench, 'panel reopen failed', {
+        previousPanelPresent: Boolean(previousPanel),
+        closeMethod,
+      });
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\n${diagnostics}`);
+    }
+    throw error;
+  }
 }
 
 /**

@@ -127,3 +127,26 @@ describe('panel bridge filesListed handling', () => {
     expect(harness.persistState).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('panel bridge remote browse handling', () => {
+  it('ignores stale remoteDirListed messages after browse is cancelled', () => {
+    const harness = loadPanelBridgeHarness({
+      remoteBrowse: null,
+      remoteBrowseCtx: null,
+    });
+
+    harness.dispatch({
+      data: {
+        kind: 'remoteDirListed',
+        payload: {
+          presetName: 'Bookmarks Test',
+          path: '/store',
+          entries: [{ name: 'e2e', type: 'd', size: 0 }],
+        },
+      },
+    });
+
+    expect(harness.state.remoteBrowse).toBeNull();
+    expect(harness.state.remoteBrowseCtx).toBeNull();
+  });
+});

@@ -25,6 +25,7 @@ const PRESET = {
 
 test.describe.serial('bookmark flows', () => {
   let shared: Awaited<ReturnType<typeof launchSharedVsCode>> | undefined;
+  let storeBookmarkSeededByThisSuite = false;
 
   test.beforeAll(async () => {
     assertDockerRunning();
@@ -48,11 +49,16 @@ test.describe.serial('bookmark flows', () => {
 
   async function closeOverlayIfOpen(): Promise<void> {
     const { panel } = session();
-    if (await panel.locator('.overlay').count() === 0) {
-      return;
-    }
-    await panel.locator('.overlay button:has-text("Cancel")').evaluate((button: HTMLButtonElement) => button.click());
-    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 10_000 }).catch(() => {});
+    const overlay = panel.locator('.overlay').first();
+    if (await overlay.count() === 0) { return; }
+
+    await expect(async () => {
+      if ((await overlay.count()) === 0 || !await overlay.isVisible().catch(() => false)) {
+        return;
+      }
+      await overlay.locator('button:has-text("Cancel")').evaluate((button: HTMLButtonElement) => button.click());
+      await expect(overlay).toBeHidden({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   }
 
   async function waitForPresetForm(): Promise<void> {
@@ -87,39 +93,54 @@ test.describe.serial('bookmark flows', () => {
     await browseBtn.evaluate((button: HTMLButtonElement) => button.click());
   }
 
+  async function addStoreBookmarkViaForm(): Promise<void> {
+    const { panel } = session();
+
+    await openManageTab(panel);
+    await panel.locator(`.preset-card:has-text("${PRESET.name}") button:has-text("Edit")`).evaluate((button: HTMLButtonElement) => button.click());
+    await waitForPresetForm();
+
+    const browseAddBtn = panel.locator('#preset-form-section button:has-text("Browse & add")');
+    await expect(browseAddBtn).toBeVisible({ timeout: 10_000 });
+    await browseAddBtn.evaluate((button: HTMLButtonElement) => button.click());
+
+    await panel.waitForSelector('.overlay', { timeout: 15_000 });
+    await panel.waitForSelector('.overlay .dir-list', { timeout: 45_000 });
+    await panel.click('.overlay button:has-text("Use this path")');
+
+    await panel.waitForSelector('#preset-form-section', { timeout: 10_000 });
+    await panel.click('#preset-form-section button:has-text("Save")');
+    await panel.waitForSelector(`.preset-card:has-text("${PRESET.name}")`, { timeout: 10_000 });
+
+    await openTransferTab(panel);
+    await selectPreset(panel, PRESET.name);
+    await expect(panel.locator('#send-to-select option[value="/store"]')).toHaveCount(1, { timeout: 10_000 });
+    storeBookmarkSeededByThisSuite = true;
+  }
+
+  async function ensureStoreBookmarkPresentForFocusedRun(): Promise<void> {
+    const { panel } = session();
+
+    await openTransferTab(panel);
+    await selectPreset(panel, PRESET.name);
+    if (await panel.locator('#send-to-select option[value="/store"]').count() > 0) {
+      return;
+    }
+
+    if (storeBookmarkSeededByThisSuite) {
+      throw new Error('Expected /store bookmark seeded by the prior serial test to persist, but it was missing');
+    }
+
+    await addStoreBookmarkViaForm();
+  }
+
   // -------------------------------------------------------------------------
   // Test 1: add bookmark via form — appears in send-to dropdown
   // -------------------------------------------------------------------------
   test('add bookmark via form — appears in send-to dropdown', async () => {
     const { panel } = session();
 
-    // Open Manage tab, click Edit on the preset card
-    await openManageTab(panel);
-    await panel.locator(`.preset-card:has-text("${PRESET.name}") button:has-text("Edit")`).evaluate((button: HTMLButtonElement) => button.click());
-    await waitForPresetForm();
-
-    // Click "Browse & add…" in the Bookmarks section
-    const browseAddBtn = panel.locator('#preset-form-section button:has-text("Browse & add")');
-    await expect(browseAddBtn).toBeVisible({ timeout: 10_000 });
-    await browseAddBtn.evaluate((button: HTMLButtonElement) => button.click());
-
-    // Remote browse overlay appears — wait for it
-    await panel.waitForSelector('.overlay', { timeout: 15_000 });
-
-    // Wait for the directory listing to finish loading (spinner gone, dir-list appears)
-    await panel.waitForSelector('.overlay .dir-list', { timeout: 45_000 });
-
-    // Click "✓ Use this path" to accept the current path (/store) as the bookmark
-    await panel.click('.overlay button:has-text("Use this path")');
-
-    // Overlay closes, we're back in the form — save it
-    await panel.waitForSelector('#preset-form-section', { timeout: 10_000 });
-    await panel.click('#preset-form-section button:has-text("Save")');
-    await panel.waitForSelector(`.preset-card:has-text("${PRESET.name}")`, { timeout: 10_000 });
-
-    // Go to Transfer tab and check the bookmarked path is in #send-to-select
-    await openTransferTab(panel);
-    await selectPreset(panel, PRESET.name);
+    await addStoreBookmarkViaForm();
 
     const options = await panel.locator('#send-to-select option').allTextContents();
     expect(options.some(t => t.includes('/store'))).toBe(true);
@@ -131,13 +152,7 @@ test.describe.serial('bookmark flows', () => {
   test('set bookmark as default — inline set-as-default button appears', async () => {
     const { panel } = session();
 
-    await openTransferTab(panel);
-    await selectPreset(panel, PRESET.name);
-
-    // The /store bookmark added in test 1 should be in the dropdown
-    const options = await panel.locator('#send-to-select option').allTextContents();
-    const bookmark = options.find(t => t === '/store');
-    expect(bookmark).toBeTruthy();
+    await ensureStoreBookmarkPresentForFocusedRun();
 
     // Select the /store bookmark (by value, not the default __default__ option)
     await selectSendTo(panel, '/store');
@@ -229,11 +244,7 @@ test.describe.serial('bookmark flows', () => {
     const { panel } = session();
 
     // Overlay may already be open from test 5; cancel it first to get a clean state
-    const overlayNow = await panel.locator('.overlay').count();
-    if (overlayNow > 0) {
-      await panel.click('.overlay button:has-text("Cancel")');
-      await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 }).catch(() => { /* already gone */ });
-    }
+    await closeOverlayIfOpen();
 
     await openTransferTab(panel);
     await selectPreset(panel, PRESET.name);
@@ -251,7 +262,7 @@ test.describe.serial('bookmark flows', () => {
     await expect(dirList).toBeVisible();
 
     // Close overlay cleanly
-    await panel.click('.overlay button:has-text("Cancel")');
+    await closeOverlayIfOpen();
   });
 
   // -------------------------------------------------------------------------
@@ -279,7 +290,7 @@ test.describe.serial('bookmark flows', () => {
     expect(breadcrumbText).toContain('store');
 
     // Clean up
-    await panel.click('.overlay button:has-text("Cancel")');
+    await closeOverlayIfOpen();
   });
 
   // -------------------------------------------------------------------------
@@ -321,7 +332,7 @@ test.describe.serial('bookmark flows', () => {
     const breadcrumbAfterBack = await panel.locator('.overlay .breadcrumb').textContent();
     expect(breadcrumbAfterBack).not.toContain('store');
 
-    await panel.click('.overlay button:has-text("Cancel")');
+    await closeOverlayIfOpen();
   });
 
   // -------------------------------------------------------------------------
@@ -386,8 +397,7 @@ test.describe.serial('bookmark flows', () => {
     await panel.click('.overlay button:has-text("Bookmark")');
 
     // Close the overlay
-    await panel.click('.overlay button:has-text("Cancel")');
-    await panel.waitForSelector('.overlay', { state: 'hidden', timeout: 5_000 });
+    await closeOverlayIfOpen();
 
     // Go to Manage tab and open Edit to verify /store appears in the bookmarks section
     await openManageTab(panel);

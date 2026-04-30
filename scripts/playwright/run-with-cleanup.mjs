@@ -7,17 +7,22 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..', '..');
 const playwrightCli = path.join(repoRoot, 'node_modules', '@playwright', 'test', 'cli.js');
 
-cleanupOrphanedVsCodeProcesses(repoRoot);
-
 const args = process.argv.slice(2);
-const result = spawnSync(process.execPath, [playwrightCli, ...args], {
-  stdio: 'inherit',
-  env: process.env,
-});
+let result;
 
-if (result.error) {
+try {
+  cleanupOrphanedVsCodeProcesses(repoRoot);
+  result = spawnSync(process.execPath, [playwrightCli, ...args], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+} finally {
+  cleanupOrphanedVsCodeProcesses(repoRoot);
+}
+
+if (result?.error) {
   console.error(result.error);
   process.exit(1);
 }
 
-process.exit(result.status ?? 1);
+process.exit(result?.status ?? 1);
