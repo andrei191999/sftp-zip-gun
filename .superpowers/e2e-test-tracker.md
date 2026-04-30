@@ -1032,3 +1032,27 @@
       - VS Code version metadata fetch timed out and reused installed `1.116.0`
       - `Settings Sync` account status became `unavailable`
       - `Error mutex already exists` appeared in VS Code main-process logs without failing the smoke run
+- `2026-04-30` release-finalization versioned artifact verification:
+  - command: `npm run qa:vsix:contents`
+  - status: pass
+  - notes:
+    - reran after bumping release metadata to `0.2.2`
+    - VSIX owned-content gate still passed with `9` required runtime entries
+- `2026-04-30` release-finalization versioned artifact verification:
+  - command: `npm run package`
+  - escalated status: pass
+  - duration: ~28.4s
+  - notes:
+    - packaged `sftp-zip-gun-0.2.2.vsix`
+    - package contained `2521` files and produced an `8.47 MB` VSIX
+- `2026-04-30` release-finalization versioned artifact verification:
+  - command: `npm run qa:smoke:vsix`
+  - status: pass
+  - duration: ~215.7s
+  - notes:
+    - isolated installed-VSIX smoke passed against `sftp-zip-gun-0.2.2.vsix`
+    - `3` Quick Upload smoke cases passed: password auth, key auth, packaged build
+    - observed environment noise only:
+      - VS Code downloaded/validated `1.118.1` during this run
+      - `Settings Sync` account status became `unavailable`
+      - cross-app IPC / mutex warnings appeared without failing the smoke run

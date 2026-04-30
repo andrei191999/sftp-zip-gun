@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 Note: entries before `0.2.1` were reconstructed from repository history, shipped VSIX artifacts in the repo root, package metadata, maintainer notes, and current code/spec evidence where commit history was incomplete. Dates and scope for those early releases should be read as best-effort release history unless a date is explicitly confirmed below.
 
+## [0.2.2] - 2026-04-30
+
+This release turns the post-`0.2.1` stabilization work into a cleaner publishable line with stronger upload reliability, better restricted-server handling, and a stricter packaged-release gate.
+
+### Added
+- An owned-content VSIX verification gate plus isolated development-host and installed-VSIX smoke validation before publish.
+- Targeted Quick Upload, read-only drop-box, and settings-defined preset coverage around the most common daily upload paths.
+
+### Changed
+- Tightened `.vscodeignore` and release packaging so internal planning, agent, and test-output files stay out of the shipped VSIX.
+- Hardened Playwright/QA helpers around panel reopen, preset-form opening, cleanup, and drop-box fixture startup so release verification better matches real extension behavior.
+
+### Fixed
+- Prevented stale remote-browse responses from resurrecting a cancelled overlay after the user had already closed or changed the browse session.
+- Increased the explicit SFTP connection `readyTimeout` to better tolerate slower server handshakes without failing early.
+- Preserved read-only/drop-box upload behavior for restricted servers by avoiding remote-management cleanup paths those servers reject.
+- Improved Quick Upload resilience around last-preset reuse, cancellation, and packaged-build smoke coverage.
+
 ## [0.2.1] - 2026-04-22
 
 This is the current published release line and the point where the broader `0.2.x` work was consolidated into a cleaner package/update story.

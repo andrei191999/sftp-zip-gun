@@ -472,3 +472,10 @@
     - isolated dev-host smoke passed with Quick Upload password/key auth
     - isolated installed-VSIX smoke passed with Quick Upload password/key auth plus packaged-build coverage
     - observed VS Code update/sync/mutex log noise did not affect smoke pass/fail outcome and is currently classified as environment noise
+- `2026-04-30` release-finalization versioned artifact verification:
+  - commands: `npm run qa:vsix:contents`, `npm run package`, `npm run qa:smoke:vsix`
+  - result: pass on the `0.2.2` working tree
+  - status impact:
+    - the actual bumped release artifact `sftp-zip-gun-0.2.2.vsix` built successfully
+    - isolated installed-VSIX smoke passed all `3` Quick Upload cases against the `0.2.2` package
+    - the current release candidate has fresh package-content and installed-artifact evidence, not only branch-level build/test evidence

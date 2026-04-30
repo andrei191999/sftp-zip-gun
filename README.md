@@ -4,6 +4,13 @@ SFTP Zip Gun keeps SFTP uploads inside VS Code. It is built for the common "ship
 
 It does not try to be a full sync client or remote file manager. The current scope is focused upload tooling: direct file upload, ZIP-based upload, grouped ZIP upload, remote destination selection, bookmarked remote paths, FileZilla preset import, and upload history.
 
+## What's New In 0.2.2
+
+- More reliable `Quick Upload` handling around last-used presets, cancel flow, and packaged-extension smoke validation.
+- Better support for upload-only / drop-box SFTP targets that reject remote management operations.
+- Safer remote-browse and connection behavior for cancelled browse sessions and slower SFTP handshakes.
+- Cleaner release packaging with stricter VSIX content checks before publish.
+
 ## Why It Exists
 
 Many teams still have SFTP-based deployment, intake, or handoff steps, but the day-to-day workflow usually lives in VS Code. SFTP Zip Gun exists to remove the friction between "I finished editing" and "I need these exact files on that exact server path."
