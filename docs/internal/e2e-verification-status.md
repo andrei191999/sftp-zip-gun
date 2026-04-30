@@ -494,3 +494,11 @@
     - VSIX owned-content validation passed with the required `9` runtime entries
     - installed-VSIX smoke passed all `3` Quick Upload cases on the merged branch
     - `develop` now has fresh post-merge release evidence and is ready to promote toward `master`
+- `2026-04-30` master post-merge verification:
+  - commands: `npm run package`, `npm run qa:docker:start`, `npm run qa:vsix:contents`, `npm run qa:smoke:vsix`
+  - result: pass on merged `master`
+  - status impact:
+    - merged `master` rebuilt and packaged `sftp-zip-gun-0.2.2.vsix` successfully
+    - VSIX owned-content validation passed with the required `9` runtime entries
+    - installed-VSIX smoke passed all `3` Quick Upload cases on the merged branch
+    - `master` now has fresh publish-gate evidence for `0.2.2`

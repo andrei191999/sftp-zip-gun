@@ -1086,3 +1086,18 @@
       - `Settings Sync` account status became `unavailable`
       - cross-app IPC / mutex warnings appeared without failing the smoke run
   - status impact: merged `develop` is green at the lightweight release-gate level and ready for a `develop` -> `master` PR
+- `2026-04-30` master post-merge verification:
+  - scope: merged PR `#3` from `develop` into `master`
+  - verification:
+    - `npm run package`: pass
+    - `npm run qa:docker:start`: pass
+    - `npm run qa:vsix:contents`: pass
+    - `npm run qa:smoke:vsix`: pass
+  - notes:
+    - rebuilt and packaged `sftp-zip-gun-0.2.2.vsix` successfully on merged `master`
+    - VSIX owned-content gate passed with `9` required runtime entries
+    - installed-VSIX smoke passed all `3` Quick Upload cases on merged `master`
+    - observed environment noise only:
+      - `Settings Sync` account status became `unavailable`
+      - cross-app IPC / mutex warnings appeared without failing the smoke run
+  - status impact: merged `master` has fresh release-gate evidence and is ready for publish of `0.2.2`
