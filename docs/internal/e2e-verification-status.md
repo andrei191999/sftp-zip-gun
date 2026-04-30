@@ -486,3 +486,11 @@
     - release branch no longer carries a stray crash dump into `develop` / `master` history
     - package-content validation remained green after the cleanup
     - no product behavior changed; this was repository hygiene only
+- `2026-04-30` develop post-merge verification:
+  - commands: `npm run package`, `npm run qa:docker:start`, `npm run qa:vsix:contents`, `npm run qa:smoke:vsix`
+  - result: pass on merged `develop` after correcting for fresh-checkout build-output absence and rerunning Docker access outside sandbox
+  - status impact:
+    - merged `develop` rebuilt and packaged `sftp-zip-gun-0.2.2.vsix` successfully
+    - VSIX owned-content validation passed with the required `9` runtime entries
+    - installed-VSIX smoke passed all `3` Quick Upload cases on the merged branch
+    - `develop` now has fresh post-merge release evidence and is ready to promote toward `master`

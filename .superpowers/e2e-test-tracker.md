@@ -1068,3 +1068,21 @@
     - notes:
       - VSIX owned-content gate still passed with `9` required runtime entries after the hygiene cleanup
   - classification: repository/release-surface hygiene, not product behavior
+- `2026-04-30` develop post-merge verification:
+  - scope: merged PR `#2` into `develop`
+  - initial gate observations:
+    - `npm run qa:vsix:contents` failed on the fresh `develop` checkout because generated build outputs `media/panel.js` and `media/panel.css` were not present yet
+    - `npm run qa:docker:start` failed in sandbox with Docker config / pipe access denied
+  - resolution:
+    - reran `npm run package` outside sandbox to regenerate build outputs and package `sftp-zip-gun-0.2.2.vsix`
+    - reran `npm run qa:docker:start` outside sandbox; QA container was already running and drop watcher restarted as PID `33872`
+  - final verification:
+    - `npm run qa:vsix:contents`: pass
+    - `npm run qa:smoke:vsix`: pass
+  - notes:
+    - VSIX owned-content gate passed with `9` required runtime entries on merged `develop`
+    - installed-VSIX smoke passed all `3` Quick Upload cases against the rebuilt `0.2.2` package
+    - observed environment noise only:
+      - `Settings Sync` account status became `unavailable`
+      - cross-app IPC / mutex warnings appeared without failing the smoke run
+  - status impact: merged `develop` is green at the lightweight release-gate level and ready for a `develop` -> `master` PR
