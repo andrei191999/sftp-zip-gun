@@ -23,7 +23,7 @@ const BOB: PresetMeta = {
   host: 'backup.example.org',
   port: 2222,
   username: 'bob',
-  remoteDir: '/home/bob',
+  remoteDir: '/archives/example-b',
   savedPaths: [],
   authType: 'password',
   keyPath: '',

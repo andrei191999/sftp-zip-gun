@@ -4,12 +4,11 @@ SFTP Zip Gun keeps SFTP uploads inside VS Code. It is built for the common "ship
 
 It does not try to be a full sync client or remote file manager. The current scope is focused upload tooling: direct file upload, ZIP-based upload, grouped ZIP upload, remote destination selection, bookmarked remote paths, FileZilla preset import, and upload history.
 
-## What's New In 0.2.2
+## What's New In 0.2.3
 
-- More reliable `Quick Upload` handling around last-used presets, cancel flow, and packaged-extension smoke validation.
-- Better support for upload-only / drop-box SFTP targets that reject remote management operations.
-- Safer remote-browse and connection behavior for cancelled browse sessions and slower SFTP handshakes.
-- Cleaner release packaging with stricter VSIX content checks before publish.
+- Cleaner public release packaging that strips internal artifacts and dependency test/example clutter from the shipped VSIX.
+- Safer public repository surface with sanitized docs, test fixtures, and contributor-facing support files.
+- The same `0.2.2` extension behavior, republished as a packaging and privacy cleanup release.
 
 ## Why It Exists
 
@@ -50,9 +49,9 @@ Those are exposed in the UI with the extension's mode names:
 
 ### Install
 
-Use whichever path matches how you distribute extensions in your environment:
+Use whichever path matches how you install extensions:
 
-1. Install the published extension if you have it from a marketplace or internal feed.
+1. Install the published extension from the VS Code Marketplace.
 2. Install a `.vsix` package built from this repository.
 3. Build locally:
 
@@ -330,15 +329,9 @@ For real UI checks, run the extension in the VS Code Extension Development Host 
 - abort/cancel behavior
 - upload history persistence
 
-## Changelog And Internal Docs
-
-- Release notes: [CHANGELOG.md](CHANGELOG.md)
-- Internal maintenance docs: [docs/internal/README.md](docs/internal/README.md)
-- Internal repo guidance: [AGENTS.md](AGENTS.md)
-- Architecture graph snapshot: [graphify-out/GRAPH_REPORT.md](graphify-out/GRAPH_REPORT.md)
-- OpenSpec change history for this feature set: [openspec/changes/sftp-upload-vscode-extension](openspec/changes/sftp-upload-vscode-extension)
-
 ## Repository
 
 - Source: [github.com/andrei191999/sftp-zip-gun](https://github.com/andrei191999/sftp-zip-gun)
+- Issues: [github.com/andrei191999/sftp-zip-gun/issues](https://github.com/andrei191999/sftp-zip-gun/issues)
+- Release notes: [CHANGELOG.md](CHANGELOG.md)
 - License: [MIT](LICENSE)

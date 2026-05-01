@@ -1062,7 +1062,7 @@ export async function addPreset(
       const keyRadio = form.locator('input[type="radio"][value="key"]');
       await keyRadio.check({ force: true });
       await expect(keyRadio).toBeChecked({ timeout: 2_000 });
-      const keyInput = form.locator('#f-auth-fields input[placeholder="/home/user/.ssh/id_rsa"]');
+      const keyInput = form.locator('#f-auth-fields input[placeholder="SSH private key path"]');
       await expect(keyInput).toBeVisible({ timeout: 2_000 });
       await keyInput.fill(preset.keyPath ?? '');
       await expect(keyInput).toHaveValue(preset.keyPath ?? '', { timeout: 2_000 });

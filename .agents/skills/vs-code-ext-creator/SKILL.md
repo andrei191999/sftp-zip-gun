@@ -64,3 +64,5 @@ Use this skill for TypeScript-first VS Code desktop extensions, especially repos
 - Route preset-backed connections through centralized credential resolution helpers.
 - Treat `readOnly` presets as upload-only/drop-box targets and avoid management operations in those flows.
 - Publish only from a clean, validated branch tip after the package and smoke checks pass.
+
+This keeps all future extension projects consistent and aligned with Andrei's preferences.

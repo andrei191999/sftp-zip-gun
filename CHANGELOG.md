@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 Note: entries before `0.2.1` were reconstructed from repository history, shipped VSIX artifacts in the repo root, package metadata, maintainer notes, and current code/spec evidence where commit history was incomplete. Dates and scope for those early releases should be read as best-effort release history unless a date is explicitly confirmed below.
 
+## [0.2.3] - 2026-04-30
+
+This release is a public-surface cleanup of `0.2.2`. It keeps the same extension feature set while stripping internal repo artifacts and unnecessary dependency clutter from the published package.
+
+### Changed
+- Removed internal planning, agent, and verification artifacts from the public repository surface.
+- Sanitized public docs and test fixtures so the repo no longer points at internal maintenance material or local-machine-shaped sample paths.
+- Tightened `.vscodeignore` and the VSIX audit gate to exclude dependency test/example/CI/docs clutter from the shipped extension package.
+
+### Fixed
+- Stopped shipping third-party dependency test and example files in the published VSIX.
+- Removed internal-doc references from the packaged README.
+- Normalized sample key-path and local-path fixtures to clearly synthetic placeholders.
+
 ## [0.2.2] - 2026-04-30
 
 This release turns the post-`0.2.1` stabilization work into a cleaner publishable line with stronger upload reliability, better restricted-server handling, and a stricter packaged-release gate.
