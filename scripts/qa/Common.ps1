@@ -70,6 +70,22 @@ function Get-QAUsersConfigPath {
   Join-Path (Get-QAConfigRoot) 'users.conf'
 }
 
+function Remove-StaleQATarget {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+
+  $existing = Get-Item -LiteralPath $Path -Force
+  if ($existing.PSIsContainer) {
+    Remove-Item -LiteralPath $Path -Recurse -Force
+  }
+}
+
 function Write-QAUsersConfig {
   $uid = 1001
   $lines = foreach ($user in Get-QAUsers) {
@@ -78,7 +94,9 @@ function Write-QAUsersConfig {
     $uid += 1
     $line
   }
-  Set-Content -LiteralPath (Get-QAUsersConfigPath) -Value $lines -Encoding ascii
+  $configPath = Get-QAUsersConfigPath
+  Remove-StaleQATarget -Path $configPath
+  Set-Content -LiteralPath $configPath -Value $lines -Encoding ascii
 }
 
 function Get-QAPrivateKeyPath {
@@ -92,12 +110,18 @@ function Get-QAPublicKeyPath {
 function Ensure-QAKeyPair {
   $privateKey = Get-QAPrivateKeyPath
   $publicKey = Get-QAPublicKeyPath
+  Remove-StaleQATarget -Path $privateKey
+  Remove-StaleQATarget -Path $publicKey
+
   if ((Test-Path -LiteralPath $privateKey) -and (Test-Path -LiteralPath $publicKey)) {
     $header = Get-Content -LiteralPath $privateKey -TotalCount 1 -ErrorAction SilentlyContinue
     if ($header -eq '-----BEGIN RSA PRIVATE KEY-----') {
       return
     }
 
+    Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $publicKey -Force -ErrorAction SilentlyContinue
+  } elseif ((Test-Path -LiteralPath $privateKey) -or (Test-Path -LiteralPath $publicKey)) {
     Remove-Item -LiteralPath $privateKey -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $publicKey -Force -ErrorAction SilentlyContinue
   }
