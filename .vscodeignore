@@ -17,9 +17,10 @@ scripts/
 .claude/
 .codex/
 .agents/
-.code-review-graph/
 .remember/
 .superpowers/
+.local-archive/
+.code-review-graph/
 playwright-report/
 test-results/
 
@@ -38,6 +39,29 @@ test-fixtures/
 lib/
 filezilla-small.xml
 
+# Runtime dependency junk that should never ship
+node_modules/**/.github/
+node_modules/**/test/
+node_modules/**/tests/
+node_modules/**/example/
+node_modules/**/examples/
+node_modules/**/docs/
+node_modules/**/doc/
+node_modules/**/coverage/
+node_modules/**/benchmark/
+node_modules/**/benchmarks/
+node_modules/**/README*
+node_modules/**/readme*
+node_modules/**/CHANGELOG*
+node_modules/**/changelog*
+node_modules/**/HISTORY*
+node_modules/**/history*
+node_modules/**/.eslintrc*
+node_modules/**/.eslintignore
+node_modules/**/WORKSPACE
+node_modules/**/Makefile
+node_modules/**/util/build_pagent.bat
+
 # Dev-only node_modules (runtime deps of ssh2-sftp-client are kept)
 node_modules/@types/
 node_modules/typescript/
@@ -49,5 +73,3 @@ node_modules/jest-*/
 node_modules/@jest/
 node_modules/ts-jest/
 node_modules/babel-jest/
-node_modules/yauzl/
-node_modules/adm-zip/

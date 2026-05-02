@@ -14,6 +14,19 @@ export interface ConnectOptions {
 
 const SSH_READY_TIMEOUT_MS = 60_000;
 
+function canRetryRelativeUploadPath(error: unknown, remotePath: string): boolean {
+  if (!remotePath.startsWith('/') || remotePath === '/') {
+    return false;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /permission denied/i.test(message);
+}
+
+function toRelativeUploadPath(remotePath: string): string {
+  return remotePath.replace(/^\/+/, '');
+}
+
 export class AbortError extends Error {
   constructor() {
     super('Upload aborted by user');
@@ -81,7 +94,24 @@ export class SftpClient {
       if (this.aborted) {
         throw new AbortError();
       }
-      throw err;
+      if (canRetryRelativeUploadPath(err, remotePath)) {
+        const retryRemotePath = toRelativeUploadPath(remotePath);
+        log('warn', `Retrying upload with relative remote path: "${remotePath}" → "${retryRemotePath}"`);
+        await this.client.put(localPath, retryRemotePath, {
+          step: (transferred: number, _chunk: number, total: number) => {
+            lastTransferred = transferred;
+            if (!this.aborted) {
+              onProgress({
+                bytesTransferred: transferred,
+                totalBytes: total,
+                percent: total > 0 ? Math.round((transferred / total) * 100) : 0,
+              });
+            }
+          },
+        });
+      } else {
+        throw err;
+      }
     }
 
     if (this.aborted) {

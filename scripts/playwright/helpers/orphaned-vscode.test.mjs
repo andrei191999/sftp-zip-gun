@@ -3,8 +3,8 @@ import { E2E_USER_DATA_PREFIX, E2E_WORKSPACE_PREFIX, filterOrphanedVsCodeProcess
 
 const repoRoot = process.cwd();
 const normalizedRepoRoot = repoRoot.replace(/\\/g, '/').toLowerCase();
-const e2eUserDir = `C:\\Users\\user\\AppData\\Local\\Temp\\${E2E_USER_DATA_PREFIX}abc123`;
-const e2eWorkspaceDir = `C:\\Users\\user\\AppData\\Local\\Temp\\${E2E_WORKSPACE_PREFIX}abc123`;
+const e2eUserDir = `X:\\synthetic-temp\\${E2E_USER_DATA_PREFIX}abc123`;
+const e2eWorkspaceDir = `X:\\synthetic-temp\\${E2E_WORKSPACE_PREFIX}abc123`;
 
 {
   const commandLine = [
@@ -26,8 +26,8 @@ const e2eWorkspaceDir = `C:\\Users\\user\\AppData\\Local\\Temp\\${E2E_WORKSPACE_
   const commandLine = [
     'Code.exe',
     '--folder-uri',
-    '"file:///C:/Users/user/Documents/project"',
-    '--user-data-dir="C:\\Users\\user\\AppData\\Roaming\\Code"',
+    '"file:///X:/synthetic-project"',
+    '--user-data-dir="X:\\synthetic-profile\\Code"',
   ].join(' ');
 
   assert.equal(
@@ -39,7 +39,7 @@ const e2eWorkspaceDir = `C:\\Users\\user\\AppData\\Local\\Temp\\${E2E_WORKSPACE_
 {
   const commandLine = [
     'Code.exe',
-    '--extensionDevelopmentPath="C:\\Workspace\\Scripts\\vs-code-extensions\\other-project"',
+    '--extensionDevelopmentPath="X:\\synthetic\\other-extension"',
     `--user-data-dir="${e2eUserDir}"`,
     `"${e2eWorkspaceDir}"`,
   ].join(' ');
@@ -55,7 +55,7 @@ const e2eWorkspaceDir = `C:\\Users\\user\\AppData\\Local\\Temp\\${E2E_WORKSPACE_
     'Code.exe',
     `--extensionDevelopmentPath="${repoRoot}"`,
     `--user-data-dir="${e2eUserDir}"`,
-    '"C:\\Users\\user\\AppData\\Local\\Temp\\some-other-workspace"',
+    '"X:\\synthetic-temp\\some-other-workspace"',
   ].join(' ');
 
   assert.equal(

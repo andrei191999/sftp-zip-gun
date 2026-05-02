@@ -2010,7 +2010,7 @@ function buildPresetForm(container) {
       keyInput = document.createElement('input');
       keyInput.type = 'text';
       keyInput.value = p.keyPath || '';
-      keyInput.placeholder = '/home/user/.ssh/id_rsa';
+      keyInput.placeholder = 'SSH private key path';
       rowKey.appendChild(keyInput);
       authFields.appendChild(rowKey);
 

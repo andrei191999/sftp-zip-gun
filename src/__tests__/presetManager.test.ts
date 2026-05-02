@@ -177,14 +177,14 @@ describe('PresetManager', () => {
       manager.resolveConnectOptions({
         ...BASE_PRESET,
         authType: 'key',
-        keyPath: 'C:\\Users\\user\\.ssh\\missing_ed25519',
+        keyPath: 'X:\\synthetic-keys\\missing_ed25519',
       })
     ).rejects.toThrow('Cannot read the SSH key file. Check that the configured key path exists and is readable.');
 
     await manager.resolveConnectOptions({
       ...BASE_PRESET,
       authType: 'key',
-      keyPath: 'C:\\Users\\user\\.ssh\\missing_ed25519',
+      keyPath: 'X:\\synthetic-keys\\missing_ed25519',
     }).catch((err: Error) => {
       expect(err.message).not.toContain('missing_ed25519');
       expect(err.message).not.toContain('ENOENT');

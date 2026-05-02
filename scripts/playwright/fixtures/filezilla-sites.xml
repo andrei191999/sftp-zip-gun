@@ -6,20 +6,20 @@
       <Port>22</Port>
       <Protocol>1</Protocol>
       <Type>0</Type>
-      <User>alice</User>
-      <Pass encoding="base64">cGFzc3dvcmQx</Pass>
-      <Name>Alice SFTP</Name>
-      <RemoteDir>/uploads/alice</RemoteDir>
+      <User>example-user-a</User>
+      <Pass encoding="base64">ZXhhbXBsZS1zZWNyZXQtMQ==</Pass>
+      <Name>Example Import A</Name>
+      <RemoteDir>/uploads/example-a</RemoteDir>
     </Server>
     <Server>
-      <Host>backup.example.org</Host>
+      <Host>backup.example.net</Host>
       <Port>2222</Port>
       <Protocol>1</Protocol>
       <Type>0</Type>
-      <User>bob</User>
-      <Pass encoding="base64">cGFzc3dvcmQy</Pass>
-      <Name>Bob Backup</Name>
-      <RemoteDir>/home/bob</RemoteDir>
+      <User>example-user-b</User>
+      <Pass encoding="base64">ZXhhbXBsZS1zZWNyZXQtMg==</Pass>
+      <Name>Example Import B</Name>
+      <RemoteDir>/archives/example-b</RemoteDir>
     </Server>
     <Server>
       <Host>invalid.example.com</Host>

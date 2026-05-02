@@ -9,6 +9,7 @@ media/panel.css
 .env
 .env.*
 !.env.example
+.mcp.json
 filezilla-small.xml
 filezilla*.xml
 !scripts/playwright/fixtures/*.xml
@@ -33,14 +34,32 @@ coverage/
 playwright-report/
 test-results/
 
-# Local AI / agent / machine-specific state — never commit
-.agents/
-.claude/
-.codex/
+# Local AI / agent / machine-specific state — keep only project-specific docs/skills
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/sftp-e2e/
+!.agents/skills/sftp-e2e/SKILL.md
+!.agents/skills/vs-code-ext-creator/
+!.agents/skills/vs-code-ext-creator/SKILL.md
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/sftp-e2e.md
+!.claude/skills/vs-code-ext-creator/
+!.claude/skills/vs-code-ext-creator/SKILL.md
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/sftp-e2e/
+!.codex/skills/sftp-e2e/SKILL.md
+!.codex/skills/vs-code-ext-creator/
+!.codex/skills/vs-code-ext-creator/SKILL.md
 .remember/
-.superpowers/
-AGENTS.md
-CLAUDE.md
+.superpowers/*
+!.superpowers/e2e-test-tracker.md
+.local-archive/
+.code-review-graph/
 notes.md
 
 # Local editor/workspace config
@@ -54,15 +73,15 @@ lib/
 docs/*
 !docs/marketplace/
 !docs/marketplace/**
+!docs/internal/
+docs/internal/*
+!docs/internal/e2e-verification-status.md
 openspec/
 
 # Local QA / smoke / Docker automation
-scripts/qa/
 docker/
 .docker/
 Dockerfile
 Dockerfile.*
 docker-compose*.yml
 docker-compose*.yaml
-# Added by code-review-graph
-.code-review-graph/
