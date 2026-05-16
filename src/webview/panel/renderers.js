@@ -11,6 +11,7 @@ function renderTabBar(app) {
     t.addEventListener('click', function () {
       if (state.view === tab.value) { return; }
       state.view = tab.value;
+      if (tab.value === 'upload') { _manageSearchStr = ''; }
       render();
     });
     bar.appendChild(t);
@@ -23,12 +24,22 @@ function render() {
   var app = document.getElementById('app');
   if (!app) { return; }
 
+  // Save focus state before clearing DOM
+  var focusedPlaceholder = null;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+    focusedPlaceholder = document.activeElement.placeholder;
+  }
+
   if (state.remoteBrowse !== null) {
     renderRemoteBrowseOverlay(app);
     window.scrollTo(0, scrollY);
     return;
   }
 
+  // Destroy any combobox overlays from the previous render before clearing DOM.
+  app.querySelectorAll('[data-combobox-container]').forEach(function(c) {
+    if (c._destroy) { c._destroy(); }
+  });
   clearEl(app);
   renderTabBar(app);
 
@@ -40,6 +51,17 @@ function render() {
 
   saveViewState();
   window.scrollTo(0, scrollY);
+
+  // Restore focus to filter input if it had focus before render
+  if (focusedPlaceholder) {
+    var inputs = app.querySelectorAll('input[type="text"]');
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i].placeholder === focusedPlaceholder) {
+        inputs[i].focus();
+        break;
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -51,30 +73,42 @@ function renderUploadView(app) {
   var rowDest = el('div', { className: 'row row-nowrap' });
   rowDest.appendChild(el('label', null, 'Account'));
 
-  var select = document.createElement('select');
-  select.id = 'preset-select';
-  select.style.flex = '1';
-  select.style.minWidth = '0';
-  state.presets.forEach(function (p) {
-    var opt = document.createElement('option');
-    opt.value = p.name;
+  // Build account items for combobox
+  var accountItems = state.presets.map(function(p) {
     var connFail = state.connectionStatus[p.name] === 'fail';
-    opt.textContent = (connFail ? '\u26A0 ' : '') + (p.readOnly ? '\uD83D\uDD12 ' : '')
-      + p.name + ' \u2014 ' + p.username + ':' + p.host;
-    if (p.name === state.selectedPresetName) { opt.selected = true; }
-    select.appendChild(opt);
+    return {
+      value: p.name,
+      label: (connFail ? '⚠ ' : '') + (p.readOnly ? '🔒 ' : '') + p.name + ' — ' + p.username + ':' + p.host,
+      searchText: [p.name, p.username, p.host]
+    };
   });
-  if (state.presets.length === 0) {
-    var optEmpty = document.createElement('option');
-    optEmpty.value = '';
-    optEmpty.textContent = 'No accounts configured \u2014 go to Manage';
-    optEmpty.disabled = true;
-    select.appendChild(optEmpty);
-    select.disabled = true;
+
+  if (accountItems.length === 0) {
+    accountItems.push({
+      value: '',
+      label: 'No accounts configured — go to Manage',
+      searchText: ''
+    });
   }
-  var _selOpt = select.options[select.selectedIndex];
-  if (_selOpt) { select.title = _selOpt.textContent; }
-  rowDest.appendChild(select);
+
+  var accountCombobox = buildCombobox({
+    id: 'preset-select',
+    items: accountItems,
+    selectedValue: state.selectedPresetName || '',
+    placeholder: 'Select account...',
+    onChange: function(newValue) {
+      if (newValue && newValue !== state.selectedPresetName) {
+        state.selectedPresetName = newValue;
+        state.selectedPath = null;
+        state.addPathValue = '';
+        delete state.connectionStatus[newValue];
+        persistState();
+        render();
+      }
+    }
+  });
+
+  rowDest.appendChild(accountCombobox);
 
   var connBtn = el('button', { className: 'secondary conn-test-btn' });
   var connIcon = el('span', { className: 'conn-icon' }, '\u21bb');
@@ -98,7 +132,6 @@ function renderUploadView(app) {
 
   // ---- Send to row ----
   var preset = getSelectedPreset();
-  var sendToSelect = null;
   var addPathInput = null;
   var browseNewBtn = null;
   var setDefaultBtn = null;
@@ -109,46 +142,57 @@ function renderUploadView(app) {
   rowSendTo.appendChild(el('label', { title: 'The remote directory where files will be uploaded' }, 'Send to'));
 
   if (preset) {
-    sendToSelect = document.createElement('select');
-    sendToSelect.id = 'send-to-select';
-
-    var optDefault = document.createElement('option');
-    optDefault.value = '__default__';
-    optDefault.textContent = (preset.remoteDir || '/') + ' (default)' + (preset.readOnly ? ' \uD83D\uDD12' : '');
-    sendToSelect.appendChild(optDefault);
-
-    (preset.savedPaths || []).forEach(function (sp) {
-      var opt = document.createElement('option');
-      opt.value = sp;
-      opt.textContent = sp;
-      sendToSelect.appendChild(opt);
+    // Build bookmark items for combobox
+    var bookmarkItems = [];
+    
+    // Default option
+    bookmarkItems.push({
+      value: '__default__',
+      label: (preset.remoteDir || '/') + ' (default)' + (preset.readOnly ? ' 🔒' : ''),
+      searchText: preset.remoteDir || '/'
     });
-
-    // Show a temporary one-time entry if selectedPath is not a known bookmark
+    
+    // Saved paths
+    (preset.savedPaths || []).forEach(function(sp) {
+      bookmarkItems.push({
+        value: sp,
+        label: sp,
+        searchText: sp
+      });
+    });
+    
+    // One-time path if it exists and isn't a known bookmark
     if (state.selectedPath && state.selectedPath !== '__add_new__' && state.selectedPath !== '__default__') {
       var isKnown = (preset.savedPaths || []).includes(state.selectedPath);
       if (!isKnown) {
-        var optTemp = document.createElement('option');
-        optTemp.value = state.selectedPath;
-        optTemp.textContent = state.selectedPath + ' (one-time)';
-        sendToSelect.appendChild(optTemp);
+        bookmarkItems.push({
+          value: state.selectedPath,
+          label: state.selectedPath + ' (one-time)',
+          searchText: state.selectedPath
+        });
       }
     }
+    
+    // Add new path option
+    bookmarkItems.push({
+      value: '__add_new__',
+      label: '+ Add new path…',
+      searchText: 'add new'
+    });
 
-    var optAdd = document.createElement('option');
-    optAdd.value = '__add_new__';
-    optAdd.textContent = '+ Add new path\u2026';
-    sendToSelect.appendChild(optAdd);
+    var bookmarkCombobox = buildCombobox({
+      id: 'send-to-select',
+      items: bookmarkItems,
+      selectedValue: state.selectedPath || '__default__',
+      placeholder: 'Select path...',
+      onChange: function(newValue) {
+        state.selectedPath = (newValue === '__default__') ? null : newValue;
+        if (newValue !== '__add_new__') { state.addPathValue = ''; }
+        render();
+      }
+    });
 
-    // Restore current selection
-    if (state.selectedPath !== null) {
-      sendToSelect.value = state.selectedPath;
-    }
-
-    rowSendTo.appendChild(sendToSelect);
-    sendToSelect.style.minWidth = '0';
-    var _sendOpt = sendToSelect.options[sendToSelect.selectedIndex];
-    if (_sendOpt) { sendToSelect.title = _sendOpt.textContent; }
+    rowSendTo.appendChild(bookmarkCombobox);
 
     // Inline "Set as default" when a saved bookmark is the active selection
     if (state.selectedPath && state.selectedPath !== '__add_new__') {
@@ -1661,8 +1705,61 @@ function renderRemoteBrowseOverlay(app) {
 function renderManageView(app) {
   // Account cards
 
+  // Action row
+  var rowActions = el('div', { className: 'row' });
+  var addBtn = el('button', { title: 'Create a new SFTP connection preset' }, '+ Add Account');
+  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;', title: 'Import SFTP accounts from a FileZilla Site Manager XML export' }, 'Import from FileZilla\u2026');
+  importBtn.disabled = state.importPending;
+  rowActions.appendChild(addBtn);
+  rowActions.appendChild(importBtn);
+  if (state.importPending) {
+    rowActions.appendChild(el('span', { className: 'spinner', style: 'margin-left:8px;' }, '\u29D7'));
+    rowActions.appendChild(el('span', { style: 'margin-left:4px;opacity:0.7;' }, 'Importing\u2026'));
+  }
+  app.appendChild(rowActions);
+
+  // ---- Search bar ----
+  var rowSearch = el('div', { className: 'row row-nowrap', style: 'margin-bottom:4px;' });
+  var manageSearch = el('input', {
+    type: 'text',
+    placeholder: 'Search accounts…',
+    style: 'flex:1;min-width:0;'
+  });
+  manageSearch.value = _manageSearchStr;
+  manageSearch.addEventListener('input', function() {
+    _manageSearchStr = manageSearch.value;
+    render();
+  });
+  rowSearch.appendChild(manageSearch);
+  app.appendChild(rowSearch);
+
+  // Filter presets
+  var visiblePresets = state.presets.filter(function(p) {
+    var targets = [p.name, p.username, p.host, p.remoteDir || ''].concat(p.savedPaths || []);
+    return fuzzyMatch(_manageSearchStr, targets);
+  });
+
+  addBtn.addEventListener('click', function () {
+    state.editingPreset = null;
+    state.showPresetForm = true;
+    state.formAuthType = 'password';
+    state.formDraft = null;
+    render();
+  });
+
+  importBtn.addEventListener('click', function () {
+    state.importPending = true;
+    render();
+    vscode.postMessage({ kind: 'importFileZilla' });
+  });
+
+  if (visiblePresets.length === 0) {
+    app.appendChild(el('div', { style: 'opacity:0.6;padding:8px;' }, 'No accounts match filter'));
+    return;
+  }
+
   // Account cards
-  state.presets.forEach(function (p) {
+  visiblePresets.forEach(function (p) {
     var card = el('div', { className: 'preset-card' });
 
     var headerDiv = el('div', { style: 'display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;' });
@@ -1758,18 +1855,6 @@ function renderManageView(app) {
     app.appendChild(card);
   });
 
-  // Action row
-  var rowActions = el('div', { className: 'row' });
-  var addBtn = el('button', { title: 'Create a new SFTP connection preset' }, '+ Add Account');
-  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;', title: 'Import SFTP accounts from a FileZilla Site Manager XML export' }, 'Import from FileZilla\u2026');
-  importBtn.disabled = state.importPending;
-  rowActions.appendChild(addBtn);
-  rowActions.appendChild(importBtn);
-  if (state.importPending) {
-    rowActions.appendChild(el('span', { className: 'spinner', style: 'margin-left:8px;' }, '\u29D7'));
-    rowActions.appendChild(el('span', { style: 'margin-left:4px;opacity:0.7;' }, 'Importing\u2026'));
-  }
-  app.appendChild(rowActions);
 
   // Preset form section
   var formSection = el('div', { id: 'preset-form-section' });
@@ -1780,21 +1865,6 @@ function renderManageView(app) {
 
   // Log output
   renderLogSection(app, false);
-
-  // Listeners
-  addBtn.addEventListener('click', function () {
-    state.editingPreset = null;
-    state.showPresetForm = true;
-    state.formAuthType = 'password';
-    state.formDraft = null; // clear stale draft
-    render();
-  });
-
-  importBtn.addEventListener('click', function () {
-    state.importPending = true;
-    render();
-    vscode.postMessage({ kind: 'importFileZilla' });
-  });
 }
 
 // ---------------------------------------------------------------------------

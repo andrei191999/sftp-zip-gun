@@ -101,6 +101,7 @@ var _updateFileControlsFn = null; // set by renderUploadView; called by buildFil
 var _fileTableContainer  = null; // set by buildFileTable; used by baseInput live-update
 var _fileTableFilterStr  = '';   // set by buildFileTable
 var _fileTableOpenRows   = [];   // set by buildFileTable
+var _manageSearchStr     = '';   // manage connections search bar
 var _fireBtnRef = null;           // set by renderUploadView; updated by updateFireState()
 function saveViewState() {
   if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }

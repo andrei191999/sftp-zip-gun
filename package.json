@@ -2,7 +2,7 @@
   "name": "sftp-zip-gun",
   "displayName": "SFTP Zip Gun",
   "description": "Developer-first SFTP uploads for VS Code with ZIP Canon, Pistol File, ZIP Gun, remote path bookmarks, and upload history.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "AndreiMacovei",
   "license": "MIT",
   "repository": {

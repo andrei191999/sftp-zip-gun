@@ -458,6 +458,194 @@ function clearEl(node) {
   while (node.firstChild) { node.removeChild(node.firstChild); }
 }
 
+// All characters of word must appear in order in target (subsequence match).
+// maxGap limits how far apart consecutive matched characters can be,
+// preventing spurious matches across unrelated segments (e.g. "ethias" matching
+// across " — bcdtravel@intake.up-nxt.com:sftp-1-2.nxt.uat.unifiedpost.com").
+function _wordMatchesTarget(word, target, maxGap) {
+  if (maxGap === undefined) { maxGap = 15; }
+  var pos = 0;
+  for (var ci = 0; ci < word.length; ci++) {
+    var idx = target.indexOf(word[ci], pos);
+    if (idx === -1) { return false; }
+    if (ci > 0 && (idx - pos + 1) > maxGap) { return false; }
+    pos = idx + 1;
+  }
+  return true;
+}
+
+/**
+ * Fuzzy multi-word filter: all space-separated words must subsequence-match at least one target.
+ * Case-insensitive. Empty query matches all.
+ * Example: "usr prod" matches "production-username" (usr→username, prod→production).
+ * @param {string} query
+ * @param {string[]} targets
+ * @returns {boolean}
+ */
+function fuzzyMatch(query, targets) {
+  if (!query || query.trim() === '') { return true; }
+
+  var lowerTargets = targets.map(function(t) { return (t || '').toLowerCase(); });
+  var words = query.toLowerCase().trim().split(/\s+/);
+
+  for (var w = 0; w < words.length; w++) {
+    var word = words[w];
+    var wordMatched = false;
+    for (var t = 0; t < lowerTargets.length; t++) {
+      if (_wordMatchesTarget(word, lowerTargets[t])) {
+        wordMatched = true;
+        break;
+      }
+    }
+    if (!wordMatched) { return false; }
+  }
+
+  return true;
+}
+
+// Registry of all currently-open combobox close functions.
+// Ensures only one combobox overlay is visible at a time.
+var _openComboboxes = [];
+
+function _closeAllComboboxes() {
+  _openComboboxes.forEach(function(close) { close(); });
+  _openComboboxes = [];
+}
+
+/**
+ * Build a custom combobox with embedded search
+ * @param {Object} config
+ * @param {Array} config.items - Array of {value, label, searchText} objects
+ * @param {string} config.selectedValue - Currently selected value
+ * @param {string} config.placeholder - Placeholder when nothing selected
+ * @param {Function} config.onChange - Called with (newValue) when selection changes
+ * @param {string} config.id - DOM id for the combobox trigger
+ * @returns {HTMLElement} - Container with trigger button and overlay
+ */
+function buildCombobox(config) {
+  var container = el('div', { style: 'position:relative;flex:1;min-width:0;', 'data-combobox-container': '1' });
+
+  var trigger = el('button', {
+    id: config.id || '',
+    style: 'width:100%;text-align:left;padding:4px 8px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:2px;cursor:pointer;'
+  });
+
+  var selectedItem = config.items.find(function(item) { return item.value === config.selectedValue; });
+  trigger.textContent = selectedItem ? selectedItem.label : (config.placeholder || 'Select...');
+
+  // Overlay (hidden by default)
+  // position:fixed so ancestor overflow:hidden never clips the dropdown.
+  // Coordinates are set dynamically in the trigger click handler.
+  var overlay = el('div', {
+    style: 'display:none;position:fixed;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-focusBorder);border-radius:2px;overflow:hidden;z-index:10000;box-shadow:0 4px 16px rgba(0,0,0,0.5);'
+  });
+
+  var searchInput = el('input', {
+    type: 'text',
+    placeholder: 'Type to filter...',
+    style: 'width:100%;padding:6px 8px;border:none;border-bottom:1px solid var(--vscode-input-border);background:var(--vscode-input-background);color:var(--vscode-input-foreground);box-sizing:border-box;'
+  });
+  overlay.appendChild(searchInput);
+
+  var optionsList = el('div', { style: 'max-height:250px;overflow-y:auto;' });
+  overlay.appendChild(optionsList);
+
+  function renderOptions(filterText) {
+    clearEl(optionsList);
+    var filtered = config.items.filter(function(item) {
+      var searchTargets = Array.isArray(item.searchText)
+        ? item.searchText
+        : [item.searchText != null ? item.searchText : item.label];
+      return fuzzyMatch(filterText || '', searchTargets);
+    });
+
+    if (filtered.length === 0) {
+      optionsList.appendChild(el('div', { style: 'padding:8px;opacity:0.6;' }, 'No matches'));
+      return;
+    }
+
+    filtered.forEach(function(item) {
+      var opt = el('div', {
+        style: 'padding:6px 8px;cursor:pointer;color:var(--vscode-foreground);' + (item.value === config.selectedValue ? 'background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground);' : '')
+      });
+      opt.textContent = item.label;
+
+      opt.addEventListener('mouseenter', function() {
+        if (item.value !== config.selectedValue) {
+          opt.style.background = 'var(--vscode-list-hoverBackground)';
+        }
+      });
+      opt.addEventListener('mouseleave', function() {
+        if (item.value !== config.selectedValue) {
+          opt.style.background = '';
+        }
+      });
+      opt.addEventListener('click', function() {
+        config.onChange(item.value);
+        overlay.style.display = 'none';
+      });
+
+      optionsList.appendChild(opt);
+    });
+  }
+
+  function closeThisOverlay() {
+    overlay.style.display = 'none';
+    _openComboboxes = _openComboboxes.filter(function(fn) { return fn !== closeThisOverlay; });
+  }
+
+  trigger.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var isOpen = overlay.style.display !== 'none';
+    if (isOpen) {
+      closeThisOverlay();
+    } else {
+      // Close any other open combobox before opening this one.
+      _closeAllComboboxes();
+      // Position the fixed overlay to sit directly below the trigger button.
+      var rect = trigger.getBoundingClientRect();
+      overlay.style.top = (rect.bottom + 2) + 'px';
+      overlay.style.left = rect.left + 'px';
+      overlay.style.width = rect.width + 'px';
+      overlay.style.display = 'block';
+      searchInput.value = '';
+      renderOptions('');
+      _openComboboxes.push(closeThisOverlay);
+      setTimeout(function() { searchInput.focus(); }, 0);
+    }
+  });
+
+  searchInput.addEventListener('input', function() {
+    renderOptions(searchInput.value);
+  });
+
+  searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeThisOverlay();
+      trigger.focus();
+    }
+  });
+
+  // Close when clicking outside. Registered once; removed when overlay is detached.
+  function onDocClick(e) {
+    if (!container.contains(e.target) && !overlay.contains(e.target)) {
+      closeThisOverlay();
+    }
+  }
+  document.addEventListener('click', onDocClick);
+
+  container.appendChild(trigger);
+  // Append overlay to body so it is never clipped by any ancestor overflow:hidden.
+  // Store cleanup on the container so callers can call container._destroy() on teardown.
+  document.body.appendChild(overlay);
+  container._destroy = function() {
+    document.removeEventListener('click', onDocClick);
+    if (overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+  };
+
+  return container;
+}
+
 function makeSvgEl(tag, attrs) {
   var node = document.createElementNS('http://www.w3.org/2000/svg', tag);
   if (attrs) {
