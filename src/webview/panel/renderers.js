@@ -11,7 +11,16 @@ function renderTabBar(app) {
     t.addEventListener('click', function () {
       if (state.view === tab.value) { return; }
       state.view = tab.value;
-      if (tab.value === 'upload') { _manageSearchStr = ''; }
+      if (tab.value === 'upload') {
+        _manageSearchStr       = '';
+        _manageInlineEditName  = null;
+        _manageAddingAccount   = false;
+        _manageAddingFromHost  = null;
+        state.editingPreset    = null;
+        state.showPresetForm   = false;
+        state.formDraft        = null;
+        _pendingScrollToPreset = null;
+      }
       render();
     });
     bar.appendChild(t);
