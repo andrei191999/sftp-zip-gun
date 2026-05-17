@@ -14,6 +14,7 @@ const parts = [
 const styleParts = [
   'base.css',
   'views-and-logs.css',
+  'manage-view.css',
   'file-table.css',
   'actions-and-groups.css',
   'status.css',
