@@ -1758,6 +1758,20 @@ function renderManageView(app) {
   var logWrapper = el('div', { className: 'manage-log-wrapper' });
   wrapper.appendChild(logWrapper);
   renderLogSection(logWrapper, false);
+
+  if (_pendingScrollToPreset) {
+    var targetName = _pendingScrollToPreset;
+    _pendingScrollToPreset = null;
+    setTimeout(function () {
+      var nameEls = wrapper.querySelectorAll('.account-row-name');
+      for (var i = 0; i < nameEls.length; i++) {
+        if (nameEls[i].textContent.trim().indexOf(targetName) === 0) {
+          nameEls[i].closest('.account-row').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          break;
+        }
+      }
+    }, 0);
+  }
 }
 
 function _renderAccountsSectionHeader(container, isSearchActive) {
@@ -2026,20 +2040,117 @@ function _renderAccountRow(container, preset, isLast) {
 function _renderInlineEditForm(container, preset) {
   var div = el('div', { className: 'inline-edit' });
   div.appendChild(el('div', { className: 'inline-edit-title' }, 'Editing \u00b7 ' + preset.name));
+
+  state.editingPreset = preset;
+  state.showPresetForm = true;
+  state.formAuthType = preset.authType;
+
+  buildPresetForm(div, {
+    hideTitle: true,
+    onCancel: function () {
+      _manageInlineEditName = null;
+      state.editingPreset = null;
+      state.showPresetForm = false;
+      state.formDraft = null;
+      render();
+    },
+    onSave: function () {
+      // postMessage is already sent by buildPresetForm's save handler.
+      // Keep the form open \u2014 host will send updated presets which triggers render().
+      // render() will rebuild without the inline form once state is updated.
+    },
+  });
+
   container.appendChild(div);
 }
 
 function _renderAddAccountArea(wrapper, allPresets) {
-  var hdr = el('div', { className: 'accounts-section-header' });
-  hdr.appendChild(el('span', { className: 'accounts-title' }, 'New Account'));
-  wrapper.appendChild(hdr);
+  var collapseBlock = el('div', { className: 'accounts-section' });
+  collapseBlock.style.flex = '0 0 auto';
+
+  var header = el('div', { className: 'accounts-section-header' });
+  var left = el('div', { className: 'accounts-header-left' });
+  left.appendChild(el('span', { className: 'accounts-title' }, 'Accounts'));
+  left.appendChild(el('span', { className: 'accounts-badge' }, String(allPresets.length)));
+  header.appendChild(left);
+
+  var right = el('div', { className: 'accounts-header-right' });
+  var cancelBtn = el('button', {
+    className: 'secondary',
+    title: 'Cancel and return to account list',
+  }, '✕ Cancel');
+  cancelBtn.addEventListener('click', function () {
+    _manageAddingAccount = false;
+    _manageAddingFromHost = null;
+    state.editingPreset = null;
+    state.showPresetForm = false;
+    state.formDraft = null;
+    render();
+  });
+  right.appendChild(cancelBtn);
+  header.appendChild(right);
+  collapseBlock.appendChild(header);
+
+  var hosts = groupPresetsByHost(allPresets).length;
+  var summaryBar = el('div', { className: 'list-collapsed-bar' });
+  summaryBar.appendChild(el('span', null, '▸'));
+  summaryBar.appendChild(el('span', null,
+    allPresets.length + ' account' + (allPresets.length !== 1 ? 's' : '') +
+    ' · ' + hosts + ' host' + (hosts !== 1 ? 's' : '') + ' — click to expand'));
+  summaryBar.addEventListener('click', function () {
+    _manageAddingAccount = false;
+    _manageAddingFromHost = null;
+    state.editingPreset = null;
+    state.showPresetForm = false;
+    state.formDraft = null;
+    render();
+  });
+  collapseBlock.appendChild(summaryBar);
+  wrapper.appendChild(collapseBlock);
+
+  _renderAddAccountForm(wrapper);
+}
+
+function _renderAddAccountForm(wrapper) {
+  var formDiv = el('div', { className: 'add-account-form' });
+
+  var titleText = _manageAddingFromHost
+    ? 'New Account on ' + _manageAddingFromHost
+    : 'New Account';
+  formDiv.appendChild(el('div', { className: 'add-account-title' }, titleText));
+
+  state.editingPreset = null;
+  state.showPresetForm = true;
+  if (!state.formDraft) { state.formAuthType = 'password'; }
+
+  buildPresetForm(formDiv, {
+    hideTitle: true,
+    prefilledHost: _manageAddingFromHost || '',
+    onCancel: function () {
+      _manageAddingAccount = false;
+      _manageAddingFromHost = null;
+      state.editingPreset = null;
+      state.showPresetForm = false;
+      state.formDraft = null;
+      render();
+    },
+    onSave: function (presetName) {
+      _manageAddingAccount = false;
+      _manageAddingFromHost = null;
+      state.showPresetForm = false;
+      state.formDraft = null;
+      _pendingScrollToPreset = presetName;
+    },
+  });
+
+  wrapper.appendChild(formDiv);
 }
 
 // ---------------------------------------------------------------------------
 // Preset / Account form
 // ---------------------------------------------------------------------------
 
-function buildPresetForm(container) {
+function buildPresetForm(container, opts) {
   var isNew = state.editingPreset === null;
   // Use formDraft when available — it preserves edits across browse round-trips
   var p = state.formDraft || state.editingPreset || {
@@ -2060,7 +2171,9 @@ function buildPresetForm(container) {
 
   var card = el('div', { className: 'preset-card' });
 
-  card.appendChild(el('h3', { style: 'margin-top:0;' }, isNew ? 'Add Account' : 'Edit Account'));
+  if (!opts || !opts.hideTitle) {
+    card.appendChild(el('h3', { style: 'margin-top:0;' }, isNew ? 'Add Account' : 'Edit Account'));
+  }
 
   function makeTextInput(labelText, value, placeholder) {
     var row = el('div', { className: 'row' });
@@ -2076,6 +2189,15 @@ function buildPresetForm(container) {
 
   var nameInput = makeTextInput('Name', p.name, 'My Server');
   var hostInput = makeTextInput('Host', p.host, 'sftp.example.com');
+  if (opts && opts.prefilledHost && isNew) {
+    hostInput.value = opts.prefilledHost;
+    hostInput.classList.add('host-prefilled');
+    hostInput.title = 'Host inherited from group — edit to override';
+    hostInput.addEventListener('focus', function () {
+      hostInput.classList.remove('host-prefilled');
+      hostInput.removeAttribute('title');
+    });
+  }
 
   // Port row (number input)
   var rowPort = el('div', { className: 'row' });
@@ -2328,13 +2450,20 @@ function buildPresetForm(container) {
     }
     state.formDraft = null; // clear on save
     vscode.postMessage({ kind: 'savePreset', payload: payload });
+    if (opts && typeof opts.onSave === 'function') {
+      opts.onSave(preset.name);
+    }
   });
 
   cancelBtn.addEventListener('click', function () {
-    state.showPresetForm = false;
-    state.editingPreset = null;
-    state.formDraft = null; // clear on cancel
-    render();
+    if (opts && typeof opts.onCancel === 'function') {
+      opts.onCancel();
+    } else {
+      state.showPresetForm = false;
+      state.editingPreset = null;
+      state.formDraft = null;
+      render();
+    }
   });
 }
 
