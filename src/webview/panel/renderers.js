@@ -1699,172 +1699,340 @@ function renderRemoteBrowseOverlay(app) {
 }
 
 // ---------------------------------------------------------------------------
+// Manage view helpers
+// ---------------------------------------------------------------------------
+
+function groupPresetsByHost(presets) {
+  var map = {};
+  presets.forEach(function (p) {
+    if (!map[p.host]) { map[p.host] = []; }
+    map[p.host].push(p);
+  });
+  return Object.keys(map)
+    .sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); })
+    .map(function (host) {
+      var sorted = map[host].slice().sort(function (a, b) {
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      });
+      return { host: host, presets: sorted };
+    });
+}
+
+function countTotalPaths(presets) {
+  return presets.reduce(function (sum, p) {
+    return sum + (p.savedPaths ? p.savedPaths.length : 0);
+  }, 0);
+}
+
+function isHostExpanded(host) {
+  return _manageExpandedHosts === null || _manageExpandedHosts.has(host);
+}
+
+// ---------------------------------------------------------------------------
 // Manage view
 // ---------------------------------------------------------------------------
 
 function renderManageView(app) {
-  // Account cards
+  var wrapper = el('div', { className: 'manage-flex-col' });
+  app.appendChild(wrapper);
 
-  // Action row
-  var rowActions = el('div', { className: 'row' });
-  var addBtn = el('button', { title: 'Create a new SFTP connection preset' }, '+ Add Account');
-  var importBtn = el('button', { className: 'secondary', style: 'margin-left:8px;', title: 'Import SFTP accounts from a FileZilla Site Manager XML export' }, 'Import from FileZilla\u2026');
-  importBtn.disabled = state.importPending;
-  rowActions.appendChild(addBtn);
-  rowActions.appendChild(importBtn);
-  if (state.importPending) {
-    rowActions.appendChild(el('span', { className: 'spinner', style: 'margin-left:8px;' }, '\u29D7'));
-    rowActions.appendChild(el('span', { style: 'margin-left:4px;opacity:0.7;' }, 'Importing\u2026'));
-  }
-  app.appendChild(rowActions);
-
-  // ---- Search bar ----
-  var rowSearch = el('div', { className: 'row row-nowrap', style: 'margin-bottom:4px;' });
-  var manageSearch = el('input', {
-    type: 'text',
-    placeholder: 'Search accounts…',
-    style: 'flex:1;min-width:0;'
-  });
-  manageSearch.value = _manageSearchStr;
-  manageSearch.addEventListener('input', function() {
-    _manageSearchStr = manageSearch.value;
-    render();
-  });
-  rowSearch.appendChild(manageSearch);
-  app.appendChild(rowSearch);
-
-  // Filter presets
-  var visiblePresets = state.presets.filter(function(p) {
+  var visiblePresets = state.presets.filter(function (p) {
+    if (!_manageSearchStr) { return true; }
     var targets = [p.name, p.username, p.host, p.remoteDir || ''].concat(p.savedPaths || []);
     return fuzzyMatch(_manageSearchStr, targets);
   });
 
-  addBtn.addEventListener('click', function () {
-    state.editingPreset = null;
-    state.showPresetForm = true;
-    state.formAuthType = 'password';
-    state.formDraft = null;
-    render();
-  });
+  var isSearchActive = _manageSearchStr.length > 0;
 
+  if (_manageAddingAccount) {
+    _renderAddAccountArea(wrapper, state.presets);
+  } else {
+    var accountsSection = el('div', { className: 'accounts-section' });
+    wrapper.appendChild(accountsSection);
+    _renderAccountsSectionHeader(accountsSection, isSearchActive);
+    _renderSearchBar(accountsSection, visiblePresets);
+    _renderStatsBar(accountsSection);
+    _renderAccountsList(accountsSection, visiblePresets, isSearchActive);
+  }
+
+  var logWrapper = el('div', { className: 'manage-log-wrapper' });
+  wrapper.appendChild(logWrapper);
+  renderLogSection(logWrapper, false);
+}
+
+function _renderAccountsSectionHeader(container, isSearchActive) {
+  var header = el('div', { className: 'accounts-section-header' });
+  var left = el('div', { className: 'accounts-header-left' });
+
+  left.appendChild(el('span', { className: 'accounts-title' }, 'Accounts'));
+  left.appendChild(el('span', { className: 'accounts-badge' }, String(state.presets.length)));
+
+  if (!isSearchActive && state.presets.length > 0) {
+    var allExpanded = _manageExpandedHosts === null ||
+      state.presets.every(function (p) { return isHostExpanded(p.host); });
+    var toggleBtn = el('button', {
+      className: 'accounts-toggle-btn' + (allExpanded ? '' : ' all-collapsed'),
+      title: allExpanded ? 'Collapse all host groups' : 'Expand all host groups',
+    }, allExpanded ? '\u25b8\u25b8 Collapse all' : '\u25be\u25be Expand all');
+    toggleBtn.addEventListener('click', function () {
+      _manageExpandedHosts = allExpanded ? new Set() : null;
+      render();
+    });
+    left.appendChild(toggleBtn);
+  }
+  header.appendChild(left);
+
+  var right = el('div', { className: 'accounts-header-right' });
+  var importBtn = el('button', {
+    className: 'secondary',
+    title: 'Import presets from FileZilla XML',
+  }, '\u2191 Import');
+  importBtn.disabled = state.importPending;
   importBtn.addEventListener('click', function () {
     state.importPending = true;
     render();
     vscode.postMessage({ kind: 'importFileZilla' });
   });
+  right.appendChild(importBtn);
+  right.appendChild(el('div', { className: 'accounts-header-divider' }));
 
-  if (visiblePresets.length === 0) {
-    app.appendChild(el('div', { style: 'opacity:0.6;padding:8px;' }, 'No accounts match filter'));
+  var addBtn = el('button', { title: 'Add a new SFTP account' }, '\uff0b Add');
+  addBtn.addEventListener('click', function () {
+    _manageAddingAccount = true;
+    _manageAddingFromHost = null;
+    _manageSearchStr = '';
+    _manageInlineEditName = null;
+    render();
+  });
+  right.appendChild(addBtn);
+  header.appendChild(right);
+  container.appendChild(header);
+}
+
+function _renderSearchBar(container, visiblePresets) {
+  var wrap = el('div', { className: 'accounts-search-wrap' });
+  wrap.appendChild(el('span', { className: 'accounts-search-icon' }, '\u2315'));
+
+  var input = el('input', {
+    type: 'text',
+    className: 'accounts-search-input',
+    placeholder: 'Filter accounts\u2026',
+  });
+  input.value = _manageSearchStr;
+  input.addEventListener('input', function () {
+    _manageSearchStr = input.value;
+    _manageInlineEditName = null;
+    state.formDraft = null;
+    render();
+  });
+  wrap.appendChild(input);
+  wrap.appendChild(el('span', { className: 'accounts-search-count' },
+    visiblePresets.length + ' / ' + state.presets.length));
+  container.appendChild(wrap);
+}
+
+function _renderStatsBar(container) {
+  var bar = el('div', { className: 'accounts-stats-bar' });
+  var hosts    = groupPresetsByHost(state.presets).length;
+  var users    = state.presets.length;
+  var paths    = countTotalPaths(state.presets);
+  var keyCount = state.presets.filter(function (p) { return p.authType === 'key'; }).length;
+  var pwdCount = state.presets.length - keyCount;
+
+  function chip(cls, label, tip) {
+    return el('span', { className: 'stat-chip ' + cls, title: tip }, '\u25c6 ' + label);
+  }
+  bar.appendChild(chip('stat-chip-hosts', hosts + ' host'  + (hosts !== 1 ? 's' : ''), 'Unique SFTP hosts'));
+  bar.appendChild(chip('stat-chip-users', users + ' user'  + (users !== 1 ? 's' : ''), 'Configured user accounts'));
+  bar.appendChild(chip('stat-chip-paths', paths + ' path'  + (paths !== 1 ? 's' : ''), 'Saved remote paths across all accounts'));
+  bar.appendChild(chip('stat-chip-key',   keyCount + ' key',                            'Key-authenticated accounts'));
+  bar.appendChild(chip('stat-chip-pass',  pwdCount + ' pwd',                            'Password-authenticated accounts'));
+  container.appendChild(bar);
+}
+
+function _renderAccountsList(container, visiblePresets, isSearchActive) {
+  var list = el('div', { className: 'accounts-list' });
+  if (state.presets.length === 0) {
+    list.appendChild(el('div', { style: 'padding:8px;opacity:0.6;' }, 'No accounts yet. Click "\uff0b Add" to create one.'));
+    container.appendChild(list);
     return;
   }
+  if (visiblePresets.length === 0) {
+    list.appendChild(el('div', { style: 'padding:8px;opacity:0.6;' }, 'No accounts match filter'));
+    container.appendChild(list);
+    return;
+  }
+  var groups = groupPresetsByHost(visiblePresets);
+  groups.forEach(function (group) {
+    _renderHostGroup(list, group.host, group.presets, isSearchActive);
+  });
+  container.appendChild(list);
+}
 
-  // Account cards
-  visiblePresets.forEach(function (p) {
-    var card = el('div', { className: 'preset-card' });
+function _renderHostGroup(container, host, presets, isSearchActive) {
+  var expanded = isSearchActive || isHostExpanded(host);
+  var groupDiv = el('div', { className: 'host-group' + (expanded ? '' : ' hg-collapsed') });
 
-    var headerDiv = el('div', { style: 'display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;' });
-    headerDiv.appendChild(el('strong', null, p.name));
-    if (p.readOnly) {
-      headerDiv.appendChild(el('span', { className: 'badge-readonly', title: 'Stat, delete, and mkdir are disabled \u2014 used for drop-box servers that reject management commands' }, '\uD83D\uDD12 drop-box'));
+  var header = el('div', { className: 'host-group-header', title: host });
+  header.addEventListener('click', function () {
+    if (_manageExpandedHosts === null) {
+      _manageExpandedHosts = new Set(state.presets.map(function (p) { return p.host; }));
     }
-
-    // Connection status indicator
-    var cs = state.connectionStatus[p.name];
-    if (cs === 'pending') {
-      headerDiv.appendChild(el('span', { className: 'spinner' }, '\u29D7'));
-    } else if (cs === 'ok') {
-      headerDiv.appendChild(el('span', { className: 'conn-ok' }, '\u2713 Connected'));
-    } else if (cs === 'fail') {
-      headerDiv.appendChild(el('span', { className: 'conn-fail' }, '\u2717 Failed'));
-    }
-
-    if (state.newPresetNames[p.name]) {
-      headerDiv.appendChild(el('span', { className: 'badge-new', title: 'This preset was added in the current session' }, 'NEW'));
-    }
-
-    card.appendChild(headerDiv);
-
-    var detail = el('div', { style: 'margin-top:2px;' }, p.host + ':' + p.port + '  \u2022  ' + p.username);
-    card.appendChild(detail);
-
-    var detailDir = el('div', { style: 'font-size:0.85em;opacity:0.8;' }, 'Default: ' + (p.remoteDir || '/'));
-    card.appendChild(detailDir);
-
-    if (p.savedPaths && p.savedPaths.length > 0) {
-      var detailBm = el('div', { style: 'font-size:0.85em;opacity:0.8;' }, 'Bookmarks: ' + p.savedPaths.join(', '));
-      card.appendChild(detailBm);
-    }
-
-    var btnRow = el('div', { style: 'margin-top:6px;' });
-
-    var editBtn = el('button', { className: 'secondary' }, 'Edit');
-    editBtn.addEventListener('click', (function (preset) {
-      return function () {
-        delete state.newPresetNames[preset.name]; // clear NEW badge on edit
-        state.editingPreset = preset;
-        state.showPresetForm = true;
-        state.formAuthType = preset.authType;
-        state.formDraft = null; // clear any stale draft
-        render();
-      };
-    }(p)));
-    btnRow.appendChild(editBtn);
-
-    var testBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, 'Test');
-    testBtn.addEventListener('click', (function (preset) {
-      return function () {
-        state.connectionStatus[preset.name] = 'pending';
-        pushLog('Testing connection to ' + preset.name + '\u2026', 'info', 'conn');
-        vscode.postMessage({ kind: 'testConnection', payload: { presetName: preset.name } });
-        render();
-      };
-    }(p)));
-    btnRow.appendChild(testBtn);
-
-    // Inline delete confirmation
-    if (state.pendingDeleteName === p.name) {
-      var confirmLbl = el('span', { style: 'margin-left:6px;font-size:0.9em;' }, 'Delete "' + p.name + '"?');
-      var confirmYes = el('button', { style: 'margin-left:4px;' }, 'Yes, delete');
-      var confirmNo  = el('button', { className: 'secondary', style: 'margin-left:4px;' }, 'Cancel');
-      (function (presetName) {
-        confirmYes.addEventListener('click', function () {
-          state.pendingDeleteName = null;
-          vscode.postMessage({ kind: 'deletePreset', payload: { name: presetName } });
-          render();
-        });
-        confirmNo.addEventListener('click', function () {
-          state.pendingDeleteName = null;
-          render();
-        });
-      }(p.name));
-      btnRow.appendChild(confirmLbl);
-      btnRow.appendChild(confirmYes);
-      btnRow.appendChild(confirmNo);
-    } else {
-      var deleteBtn = el('button', { className: 'secondary', style: 'margin-left:6px;' }, 'Delete');
-      (function (presetName) {
-        deleteBtn.addEventListener('click', function () {
-          state.pendingDeleteName = presetName;
-          render();
-        });
-      }(p.name));
-      btnRow.appendChild(deleteBtn);
-    }
-
-    card.appendChild(btnRow);
-    app.appendChild(card);
+    if (_manageExpandedHosts.has(host)) { _manageExpandedHosts.delete(host); }
+    else                                { _manageExpandedHosts.add(host); }
+    render();
   });
 
+  header.appendChild(el('span', { className: 'host-group-chevron' }, '\u25be'));
+  header.appendChild(el('span', { className: 'host-group-name' }, host));
 
-  // Preset form section
-  var formSection = el('div', { id: 'preset-form-section' });
-  app.appendChild(formSection);
-  if (state.showPresetForm) {
-    buildPresetForm(formSection);
+  var pathsForGroup = presets.reduce(function (s, p) {
+    return s + (p.savedPaths ? p.savedPaths.length : 0);
+  }, 0);
+  var metaParts = [presets.length + ' account' + (presets.length !== 1 ? 's' : '')];
+  if (pathsForGroup > 0) { metaParts.push(pathsForGroup + ' path' + (pathsForGroup !== 1 ? 's' : '')); }
+  header.appendChild(el('span', { className: 'host-group-meta' }, metaParts.join(' \u00b7 ')));
+
+  var addHostBtn = el('button', {
+    className: 'secondary row-act-btn host-group-add-btn',
+    title: 'Add another user on ' + host,
+  }, '\uff0b');
+  addHostBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    _manageAddingAccount = true;
+    _manageAddingFromHost = host;
+    _manageSearchStr = '';
+    _manageInlineEditName = null;
+    state.formDraft = null;
+    render();
+  });
+  header.appendChild(addHostBtn);
+  groupDiv.appendChild(header);
+
+  var rowsDiv = el('div', { className: 'host-group-rows' });
+  presets.forEach(function (preset, idx) {
+    _renderAccountRow(rowsDiv, preset, idx === presets.length - 1);
+  });
+  groupDiv.appendChild(rowsDiv);
+  container.appendChild(groupDiv);
+}
+
+function _renderAccountRow(container, preset, isLast) {
+  var isEditing       = _manageInlineEditName === preset.name;
+  var isPendingDelete = state.pendingDeleteName === preset.name;
+  var cs              = state.connectionStatus[preset.name];
+
+  var rowDiv = el('div', {
+    className: 'account-row' +
+      (isLast    ? ' last-row'          : '') +
+      (isEditing ? ' row-editing'       : '') +
+      (isPendingDelete ? ' row-pending-delete' : ''),
+  });
+
+  var info   = el('div', { className: 'account-row-info' });
+  var nameEl = el('div', {
+    className: 'account-row-name' + (isEditing ? ' editing-active' : ''),
+  }, preset.name);
+
+  if (preset.readOnly) {
+    nameEl.appendChild(el('span', {
+      className: 'badge-readonly',
+      title: 'Drop-box: upload-only',
+      style: 'margin-left:4px;',
+    }, '\uD83D\uDD12'));
+  }
+  if (state.newPresetNames[preset.name]) {
+    nameEl.appendChild(el('span', { className: 'badge-new', style: 'margin-left:4px;' }, 'NEW'));
+  }
+  if (cs === 'pending') { nameEl.appendChild(el('span', { style: 'margin-left:4px;' }, '\u29D7')); }
+  else if (cs === 'ok') { nameEl.appendChild(el('span', { style: 'margin-left:4px;color:var(--vscode-testing-iconPassed)' }, '\u2713')); }
+  else if (cs === 'fail') { nameEl.appendChild(el('span', { style: 'margin-left:4px;color:var(--vscode-testing-iconFailed)' }, '\u2717')); }
+
+  info.appendChild(nameEl);
+
+  var metaParts = [preset.username];
+  if (preset.remoteDir) { metaParts.push(preset.remoteDir); }
+  if (preset.savedPaths && preset.savedPaths.length) {
+    preset.savedPaths.forEach(function (p) { metaParts.push(p); });
+  }
+  info.appendChild(el('div', { className: 'account-row-meta' }, metaParts.join(' \u00b7 ')));
+  rowDiv.appendChild(info);
+
+  var isKey = preset.authType === 'key';
+  rowDiv.appendChild(el('span', {
+    className: 'account-auth-pill ' + (isKey ? 'auth-pill-key' : 'auth-pill-pass'),
+  }, isKey ? 'KEY' : 'PWD'));
+
+  var actionsDiv = el('div', { className: 'account-row-actions' });
+  if (isPendingDelete) {
+    var confirmWrap = el('div', { className: 'delete-confirm-inline' });
+    confirmWrap.appendChild(el('span', { className: 'delete-confirm-label' }, 'Delete?'));
+    var yesBtn = el('button', { className: 'row-act-btn', title: 'Confirm delete' }, 'Yes');
+    yesBtn.addEventListener('click', (function (name) {
+      return function () {
+        state.pendingDeleteName = null;
+        vscode.postMessage({ kind: 'deletePreset', payload: { name: name } });
+      };
+    }(preset.name)));
+    var noBtn = el('button', { className: 'row-act-btn', title: 'Cancel' }, 'No');
+    noBtn.addEventListener('click', function () { state.pendingDeleteName = null; render(); });
+    confirmWrap.appendChild(yesBtn);
+    confirmWrap.appendChild(noBtn);
+    actionsDiv.appendChild(confirmWrap);
+  } else {
+    var editBtn = el('button', {
+      className: 'row-act-btn' + (isEditing ? ' btn-edit-active' : ''),
+      title: isEditing ? 'Editing this account' : 'Edit this account',
+    }, '\u270e');
+    editBtn.addEventListener('click', (function (p) {
+      return function () {
+        if (_manageInlineEditName === p.name) {
+          _manageInlineEditName = null;
+        } else {
+          _manageInlineEditName = p.name;
+          state.formDraft = null;
+        }
+        render();
+      };
+    }(preset)));
+    actionsDiv.appendChild(editBtn);
+
+    var testBtn = el('button', { className: 'row-act-btn', title: 'Test connection now' }, '\u26a1');
+    testBtn.addEventListener('click', (function (p) {
+      return function () {
+        state.connectionStatus[p.name] = 'pending';
+        pushLog('Testing connection to ' + p.name + '\u2026', 'info', 'conn');
+        vscode.postMessage({ kind: 'testConnection', payload: { presetName: p.name } });
+        render();
+      };
+    }(preset)));
+    actionsDiv.appendChild(testBtn);
+
+    var delBtn = el('button', { className: 'row-act-btn btn-delete', title: 'Delete account' }, '\u2715');
+    delBtn.addEventListener('click', (function (p) {
+      return function () { state.pendingDeleteName = p.name; render(); };
+    }(preset)));
+    actionsDiv.appendChild(delBtn);
   }
 
-  // Log output
-  renderLogSection(app, false);
+  rowDiv.appendChild(actionsDiv);
+  container.appendChild(rowDiv);
+
+  if (isEditing) {
+    _renderInlineEditForm(container, preset);
+  }
+}
+
+function _renderInlineEditForm(container, preset) {
+  var div = el('div', { className: 'inline-edit' });
+  div.appendChild(el('div', { className: 'inline-edit-title' }, 'Editing \u00b7 ' + preset.name));
+  container.appendChild(div);
+}
+
+function _renderAddAccountArea(wrapper, allPresets) {
+  var hdr = el('div', { className: 'accounts-section-header' });
+  hdr.appendChild(el('span', { className: 'accounts-title' }, 'New Account'));
+  wrapper.appendChild(hdr);
 }
 
 // ---------------------------------------------------------------------------
