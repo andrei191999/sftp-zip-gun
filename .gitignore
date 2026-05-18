@@ -34,6 +34,13 @@ coverage/
 playwright-report/
 test-results/
 
+# Graphify generated outputs and Obsidian vault (local only)
+graphify-out/
+obsidian/
+.graphify_python
+.graphify_detect.json
+nimbalyst-local/
+
 # Local AI / agent / machine-specific state — keep only project-specific docs/skills
 .agents/*
 !.agents/skills/
@@ -68,6 +75,9 @@ notes.md
 # Throwaway spikes and unrelated binaries
 spikes/
 lib/
+
+# Local utility scripts (not part of the extension)
+scripts/regen-graph-outputs.py
 
 # Internal planning/spec artifacts
 docs/*

@@ -101,6 +101,14 @@ var _updateFileControlsFn = null; // set by renderUploadView; called by buildFil
 var _fileTableContainer  = null; // set by buildFileTable; used by baseInput live-update
 var _fileTableFilterStr  = '';   // set by buildFileTable
 var _fileTableOpenRows   = [];   // set by buildFileTable
+var _manageSearchStr      = '';   // manage connections search bar
+// --- manage view redesign state ---
+var _manageExpandedHosts  = null; // null = all expanded; Set<string> when user has interacted
+var _manageInlineEditName = null; // preset name currently inline-edited, or null
+var _manageAddingAccount  = false;// true when add-account accordion is open
+var _manageAddingFromHost = null; // host string to pre-fill, or null
+var _pendingScrollToPreset = null; // preset name to scroll into view after next render
+var _manageListScrollTop = 0;
 var _fireBtnRef = null;           // set by renderUploadView; updated by updateFireState()
 function saveViewState() {
   if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }

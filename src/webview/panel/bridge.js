@@ -130,6 +130,7 @@ window.addEventListener('message', function (event) {
       state.showPresetForm = false;
       state.editingPreset = null;
       state.formDraft = null;
+      _manageInlineEditName = null;
       // Clean up old connection status entry on rename
       if (msg.payload.originalName && msg.payload.originalName !== saved.name) {
         delete state.connectionStatus[msg.payload.originalName];
@@ -146,6 +147,7 @@ window.addEventListener('message', function (event) {
       if (state.selectedPresetName === msg.payload.name) {
         state.selectedPresetName = state.presets.length ? state.presets[0].name : null;
       }
+      _manageInlineEditName = null;
       break;
     }
 

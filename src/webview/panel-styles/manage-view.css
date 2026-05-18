@@ -1,0 +1,324 @@
+/* ---------------------------------------------------------------------------
+   Manage Connections redesign — host-grouped accounts, inline edit, accordion
+   IMPORTANT: Uses VS Code CSS variables only. No rgba(var(...-rgb), N) —
+   VS Code does not expose -rgb variants. Use color-mix() or inputOption vars.
+--------------------------------------------------------------------------- */
+
+/* Flex column — fills viewport height below the tab bar (~36px) + body padding (16px top) */
+.manage-flex-col {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 68px); /* 16px body padding top + ~36px tab bar + 16px body padding bottom */
+  overflow: hidden;
+}
+
+/* Unified bordered block: header + search + stats + list share one border */
+.accounts-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+/* Section header row */
+.accounts-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px 5px 12px;
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+  border-bottom: 1px solid var(--vscode-input-border);
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* 2px accent left stripe */
+.accounts-section-header::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 4px; bottom: 4px;
+  width: 2px;
+  background: var(--vscode-focusBorder);
+  border-radius: 1px;
+}
+
+.accounts-header-left  { display: flex; align-items: center; gap: 6px; }
+.accounts-header-right { display: flex; align-items: center; gap: 3px; }
+
+.accounts-title {
+  font-size: 0.8em; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* Badge — uses pre-existing VS Code inputOption tint variables (theme-safe) */
+.accounts-badge {
+  font-size: 0.8em; font-weight: 600;
+  background: var(--vscode-inputOption-activeBackground);
+  color: var(--vscode-focusBorder);
+  border: 1px solid var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+  border-radius: 10px; padding: 0 6px; line-height: 1.6;
+}
+
+/* Single collapse/expand toggle */
+.accounts-toggle-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 3px; padding: 2px 7px;
+  font-size: 0.8em; color: var(--vscode-descriptionForeground);
+  cursor: pointer; white-space: nowrap;
+}
+
+.accounts-toggle-btn:hover {
+  border-color: var(--vscode-focusBorder);
+  color: var(--vscode-foreground);
+}
+
+/* All-collapsed state: glows to signal hidden content */
+.accounts-toggle-btn.all-collapsed {
+  color: var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-inputOption-activeBackground);
+}
+
+.accounts-header-divider {
+  width: 1px; height: 13px;
+  background: var(--vscode-input-border); margin: 0 1px;
+}
+
+/* Search band */
+.accounts-search-wrap {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 9px;
+  background: var(--vscode-input-background);
+  border-bottom: 1px solid var(--vscode-input-border);
+  flex-shrink: 0;
+}
+
+.accounts-search-icon { color: var(--vscode-input-placeholderForeground); font-size: 1em; flex-shrink: 0; }
+
+.accounts-search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  padding: 6px 0; font-family: inherit; font-size: inherit;
+  color: var(--vscode-input-foreground);
+}
+
+.accounts-search-input::placeholder { color: var(--vscode-input-placeholderForeground); }
+
+.accounts-search-count { font-size: 0.8em; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+
+/* Stats chips */
+.accounts-stats-bar {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 4px 9px;
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+  border-bottom: 1px solid var(--vscode-input-border);
+  flex-shrink: 0;
+}
+
+.stat-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 0.8em; padding: 1px 6px;
+  border-radius: 10px; border: 1px solid transparent;
+  white-space: nowrap; cursor: default;
+}
+
+/* Decorative rgba tints are permitted (low opacity, non-theme-critical) */
+.stat-chip-hosts { background: var(--vscode-inputOption-activeBackground); color: var(--vscode-focusBorder);                     border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder)); }
+.stat-chip-users { background: rgba(80, 180, 200, 0.10); color: var(--vscode-testing-iconPassed, #50b4c8);   border-color: rgba(80, 180, 200, 0.2); }
+.stat-chip-paths { background: rgba(180, 120, 255, 0.10); color: var(--vscode-symbolIcon-colorForeground, #b478ff); border-color: rgba(180, 120, 255, 0.2); }
+.stat-chip-key   { background: rgba(80, 200, 140, 0.10); color: var(--vscode-testing-iconPassed, #50c88c);   border-color: rgba(80, 200, 140, 0.2); }
+.stat-chip-pass  { background: rgba(200, 140, 80, 0.10); color: var(--vscode-editorWarning-foreground, #c88c50); border-color: rgba(200, 140, 80, 0.2); }
+
+/* Scrollable accounts list */
+.accounts-list { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* Host group */
+.host-group { border-bottom: 1px solid var(--vscode-input-border); }
+.host-group:last-child { border-bottom: none; }
+
+.host-group-header {
+  display: flex; align-items: center; gap: 6px; padding: 5px 9px;
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+  cursor: pointer;
+  border-bottom: 1px solid var(--vscode-input-border);
+}
+
+.host-group-header:hover { background: var(--vscode-list-hoverBackground); }
+.host-group.hg-collapsed .host-group-header { border-bottom: none; }
+
+.host-group-chevron {
+  font-size: 0.75em; color: var(--vscode-descriptionForeground);
+  transition: transform 0.18s; width: 10px; flex-shrink: 0; display: inline-block;
+}
+
+.host-group.hg-collapsed .host-group-chevron { transform: rotate(-90deg); }
+
+.host-group-name {
+  font-size: 0.9em; font-weight: 500; color: var(--vscode-foreground);
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.host-group-meta { font-size: 0.8em; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+
+.host-group-add-btn { opacity: 0; transition: opacity 0.15s; padding: 1px 5px; font-size: 0.8em; }
+.host-group-header:hover .host-group-add-btn { opacity: 1; }
+
+.host-group.hg-collapsed .host-group-rows { display: none; }
+
+/* Account row */
+.account-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 9px 5px 22px;
+  border-bottom: 1px solid var(--vscode-input-border);
+  position: relative; transition: background 0.1s;
+}
+
+.account-row.last-row { border-bottom: none; }
+.account-row:hover { background: var(--vscode-list-hoverBackground); }
+
+/* L-shaped connector lines */
+.account-row::before {
+  content: ''; position: absolute;
+  left: 13px; top: 0; bottom: 0;
+  width: 1px; background: var(--vscode-input-border);
+}
+
+.account-row.last-row::before { bottom: 50%; }
+
+.account-row::after {
+  content: ''; position: absolute;
+  left: 13px; top: 50%; width: 6px; height: 1px;
+  background: var(--vscode-input-border);
+}
+
+/* Editing state — use pre-existing inputOption background (theme-safe) */
+.account-row.row-editing {
+  background: var(--vscode-inputOption-activeBackground);
+}
+
+.account-row-info { flex: 1; min-width: 0; }
+
+.account-row-name {
+  font-size: 0.9em; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--vscode-foreground);
+}
+
+.account-row-name.editing-active { color: var(--vscode-focusBorder); }
+
+.account-row-meta {
+  font-size: 0.8em; color: var(--vscode-descriptionForeground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 1px; font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.account-auth-pill {
+  font-size: 0.75em; font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 600; padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+}
+
+.auth-pill-key  { background: rgba(80, 200, 140, 0.13); color: var(--vscode-testing-iconPassed, #50c88c); }
+.auth-pill-pass { background: rgba(200, 140, 80, 0.13);  color: var(--vscode-editorWarning-foreground, #c88c50); }
+
+.account-row-actions {
+  display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0;
+}
+
+.account-row:hover .account-row-actions,
+.account-row.row-editing .account-row-actions,
+.account-row.row-pending-delete .account-row-actions { opacity: 1; }
+
+.row-act-btn {
+  padding: 2px 5px; background: transparent;
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 3px; font-size: 0.8em; cursor: pointer;
+}
+
+.row-act-btn:hover { background: var(--vscode-list-hoverBackground); }
+
+.row-act-btn.btn-delete:hover {
+  background: rgba(200, 80, 80, 0.13);
+  color: var(--vscode-testing-iconFailed, #c85050);
+  border-color: rgba(200, 80, 80, 0.3);
+}
+
+/* Edit-active: use inputOption vars (theme-safe alternative to rgba(focusBorder-rgb)) */
+.row-act-btn.btn-edit-active {
+  background: var(--vscode-inputOption-activeBackground);
+  color: var(--vscode-focusBorder);
+  border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+}
+
+.delete-confirm-inline { display: flex; align-items: center; gap: 4px; font-size: 0.8em; }
+.delete-confirm-label  { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+
+/* Inline edit form */
+.inline-edit {
+  border-top: 1px solid var(--vscode-focusBorder);
+  border-bottom: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  padding: 10px 9px 10px 22px; position: relative;
+}
+
+.inline-edit::before {
+  content: ''; position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px; background: var(--vscode-focusBorder);
+}
+
+/* ▲ connector arrow pointing at the parent account row */
+.inline-edit::after {
+  content: '▲'; position: absolute;
+  top: -7px; left: 36px;
+  font-size: 0.6em; color: var(--vscode-focusBorder); line-height: 1;
+}
+
+.inline-edit-title {
+  font-size: 0.8em; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--vscode-focusBorder); margin-bottom: 8px;
+}
+
+/* Collapsed list summary bar (shown while add accordion is open) */
+.list-collapsed-bar {
+  border: 1px solid var(--vscode-input-border);
+  border-top: none;
+  padding: 5px 9px;
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+  font-size: 0.85em; color: var(--vscode-descriptionForeground);
+  cursor: pointer; display: flex; align-items: center; gap: 7px;
+}
+
+.list-collapsed-bar:hover { background: var(--vscode-list-hoverBackground); }
+
+/* Add account form container */
+.add-account-form {
+  border-top: none;
+  border: 1px solid var(--vscode-focusBorder);
+  border-radius: 4px; padding: 10px;
+  background: var(--vscode-input-background);
+  position: relative; margin-bottom: 8px;
+}
+
+.add-account-form::before {
+  content: ''; position: absolute;
+  left: 0; top: 0; bottom: 0; width: 2px;
+  background: var(--vscode-focusBorder);
+  border-radius: 4px 0 0 4px;
+}
+
+.add-account-title {
+  font-size: 0.8em; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--vscode-focusBorder); margin-bottom: 8px;
+}
+
+/* Pre-filled host field — editable but visually marked as inherited */
+.host-prefilled { opacity: 0.6; font-style: italic; }
+
+/* Log section — flex-shrink:0 keeps it always at the bottom */
+.manage-log-wrapper { flex-shrink: 0; }
