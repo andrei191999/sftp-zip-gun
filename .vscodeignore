@@ -24,6 +24,14 @@ scripts/
 playwright-report/
 test-results/
 
+obsidian/
+nimbalyst-local/
+graphify-out/
+.graphify_python
+.graphify_detect.json
+*.patch
+coverage/
+
 # Internal / planning files
 .env
 .env.*

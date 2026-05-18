@@ -41,6 +41,9 @@ obsidian/
 .graphify_detect.json
 nimbalyst-local/
 
+# Throwaway patch files
+*.patch
+
 # Local AI / agent / machine-specific state — keep only project-specific docs/skills
 .agents/*
 !.agents/skills/
