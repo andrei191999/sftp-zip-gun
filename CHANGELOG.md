@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 Note: entries before `0.2.1` were reconstructed from repository history, shipped VSIX artifacts in the repo root, package metadata, maintainer notes, and current code/spec evidence where commit history was incomplete. Dates and scope for those early releases should be read as best-effort release history unless a date is explicitly confirmed below.
 
+## [0.3.0] - 2026-05-18
+
+### Added
+- Double-click any file in the file list to open it in the editor beside existing open files. Already-open files are brought into focus rather than reopened. Displays a warning toast if the file cannot be opened.
+
+### Changed
+- Manage view redesigned: presets are now grouped by host in a collapsible accordion. Inline edit form replaces the separate preset form for editing existing presets.
+- Account and remote-path pickers replaced with searchable comboboxes. Type to filter the list without scrolling.
+- Preset metadata loaded from `settings.json` is now filtered to the known field allowlist before being sent to the webview, so any hand-edited extra fields stay out of the UI payload.
+- Dev-only artifacts (Obsidian vault, graphify outputs, patch files) are now explicitly excluded from the published VSIX.
+
+### Fixed
+- Scroll position in the manage view is now preserved across all account row actions: Test, Delete, cancel-delete, expand/collapse host group, inline edit open/save, and search.
+- Pending delete confirmation and inline edit state are now cleared when switching tabs, so those UI states can no longer ghost back when returning to the manage view.
+- Stale `select` / `sendToSelect` event listeners left over from the pre-combobox refactor were removed. These referenced undeclared variables and would have thrown a `ReferenceError` on every render of the upload view.
+
+## [0.2.5] - 2026-05-17
+
+Internal pre-release of the manage-view redesign, shipped as part of `0.3.0`.
+
+### Added
+- Host-grouped accordion layout in the manage view with expand/collapse per host.
+- Inline preset edit form: edit a preset's fields directly in the account list row without navigating away.
+
+### Changed
+- Tab-switch now resets manage-view transient state (expanded groups, form draft) so the view opens clean on return.
+- Layout height and overflow handling improved so the manage and upload views fill the panel correctly at any panel size.
+
+## [0.2.4] - 2026-05-17
+
+Internal pre-release of the combobox pickers, shipped as part of `0.3.0`.
+
+### Added
+- Searchable combobox for the account picker in the upload view. Type to filter by preset name, username, or host.
+- Searchable combobox for the remote-path picker in the upload view. Type to filter bookmarks and the default path.
+
 ## [0.2.3] - 2026-04-30
 
 This release is a public-surface cleanup of `0.2.2`. It keeps the same extension feature set while stripping internal repo artifacts and unnecessary dependency clutter from the published package.
