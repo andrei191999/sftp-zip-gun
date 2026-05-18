@@ -31,8 +31,14 @@ export class PresetManager {
           typeof (item as PresetMeta).host === 'string'
       )
       .map((item) => ({
-        ...item,
-        readOnly: item.readOnly === true,
+        name:       item.name,
+        host:       item.host,
+        port:       typeof item.port === 'number' ? item.port : 22,
+        username:   typeof item.username === 'string' ? item.username : '',
+        remoteDir:  typeof item.remoteDir === 'string' ? item.remoteDir : '',
+        authType:   item.authType === 'key' ? 'key' : 'password',
+        keyPath:    typeof item.keyPath === 'string' ? item.keyPath : '',
+        readOnly:   item.readOnly === true,
         savedPaths: Array.isArray(item.savedPaths) ? item.savedPaths : [],
       }));
   }

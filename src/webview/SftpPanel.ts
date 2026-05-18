@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { PresetManager } from '../config/presetManager';
 import { StateManager } from '../config/stateManager';
 import { SftpClient } from '../sftp/sftpClient';
@@ -235,7 +236,13 @@ export class SftpPanel {
       }
 
       case 'openFileInEditor': {
-        void vscode.window.showTextDocument(vscode.Uri.file(msg.payload.filePath));
+        const filePath = msg.payload.filePath;
+        if (typeof filePath !== 'string' || !filePath) { break; }
+        const targetColumn = vscode.window.visibleTextEditors[0]?.viewColumn ?? vscode.ViewColumn.Beside;
+        vscode.window.showTextDocument(vscode.Uri.file(filePath), { preview: false, viewColumn: targetColumn }).then(
+          undefined,
+          () => { void vscode.window.showWarningMessage(`Cannot open: ${path.basename(filePath)}`); }
+        );
         break;
       }
 

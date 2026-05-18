@@ -20,6 +20,8 @@ function renderTabBar(app) {
         state.showPresetForm   = false;
         state.formDraft        = null;
         _pendingScrollToPreset = null;
+        _manageListScrollTop   = 0;
+        state.pendingDeleteName = null;
       }
       render();
     });
@@ -1737,6 +1739,11 @@ function isHostExpanded(host) {
   return _manageExpandedHosts === null || _manageExpandedHosts.has(host);
 }
 
+function _saveAccountsListScroll() {
+  var list = document.querySelector('.accounts-list');
+  _manageListScrollTop = list ? list.scrollTop : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Manage view
 // ---------------------------------------------------------------------------
@@ -1762,6 +1769,14 @@ function renderManageView(app) {
     _renderSearchBar(accountsSection, visiblePresets);
     _renderStatsBar(accountsSection);
     _renderAccountsList(accountsSection, visiblePresets, isSearchActive);
+    if (_manageListScrollTop > 0) {
+      var saved = _manageListScrollTop;
+      _manageListScrollTop = 0;
+      requestAnimationFrame(function () {
+        var listEl = accountsSection.querySelector('.accounts-list');
+        if (listEl) { listEl.scrollTop = saved; }
+      });
+    }
   }
 
   var logWrapper = el('div', { className: 'manage-log-wrapper' });
@@ -1799,6 +1814,7 @@ function _renderAccountsSectionHeader(container, isSearchActive) {
     }, allExpanded ? '\u25b8\u25b8 Collapse all' : '\u25be\u25be Expand all');
     toggleBtn.addEventListener('click', function () {
       _manageExpandedHosts = allExpanded ? new Set() : null;
+      _saveAccountsListScroll();
       render();
     });
     left.appendChild(toggleBtn);
@@ -1846,6 +1862,7 @@ function _renderSearchBar(container, visiblePresets) {
     _manageSearchStr = input.value;
     _manageInlineEditName = null;
     state.formDraft = null;
+    _saveAccountsListScroll();
     render();
   });
   wrap.appendChild(input);
@@ -1903,6 +1920,7 @@ function _renderHostGroup(container, host, presets, isSearchActive) {
     }
     if (_manageExpandedHosts.has(host)) { _manageExpandedHosts.delete(host); }
     else                                { _manageExpandedHosts.add(host); }
+    _saveAccountsListScroll();
     render();
   });
 
@@ -1998,7 +2016,7 @@ function _renderAccountRow(container, preset, isLast) {
       };
     }(preset.name)));
     var noBtn = el('button', { className: 'row-act-btn', title: 'Cancel' }, 'No');
-    noBtn.addEventListener('click', function () { state.pendingDeleteName = null; render(); });
+    noBtn.addEventListener('click', function () { state.pendingDeleteName = null; _saveAccountsListScroll(); render(); });
     confirmWrap.appendChild(yesBtn);
     confirmWrap.appendChild(noBtn);
     actionsDiv.appendChild(confirmWrap);
@@ -2015,6 +2033,7 @@ function _renderAccountRow(container, preset, isLast) {
           _manageInlineEditName = p.name;
           state.formDraft = null;
         }
+        _saveAccountsListScroll();
         render();
       };
     }(preset)));
@@ -2026,6 +2045,7 @@ function _renderAccountRow(container, preset, isLast) {
         state.connectionStatus[p.name] = 'pending';
         pushLog('Testing connection to ' + p.name + '\u2026', 'info', 'conn');
         vscode.postMessage({ kind: 'testConnection', payload: { presetName: p.name } });
+        _saveAccountsListScroll();
         render();
       };
     }(preset)));
@@ -2033,7 +2053,7 @@ function _renderAccountRow(container, preset, isLast) {
 
     var delBtn = el('button', { className: 'row-act-btn btn-delete', title: 'Delete account' }, '\u2715');
     delBtn.addEventListener('click', (function (p) {
-      return function () { state.pendingDeleteName = p.name; render(); };
+      return function () { state.pendingDeleteName = p.name; _saveAccountsListScroll(); render(); };
     }(preset)));
     actionsDiv.appendChild(delBtn);
   }
@@ -2112,6 +2132,7 @@ function _renderAddAccountArea(wrapper, allPresets) {
     state.editingPreset = null;
     state.showPresetForm = false;
     state.formDraft = null;
+    _saveAccountsListScroll();
     render();
   });
   collapseBlock.appendChild(summaryBar);

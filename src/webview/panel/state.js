@@ -108,6 +108,7 @@ var _manageInlineEditName = null; // preset name currently inline-edited, or nul
 var _manageAddingAccount  = false;// true when add-account accordion is open
 var _manageAddingFromHost = null; // host string to pre-fill, or null
 var _pendingScrollToPreset = null; // preset name to scroll into view after next render
+var _manageListScrollTop = 0;
 var _fireBtnRef = null;           // set by renderUploadView; updated by updateFireState()
 function saveViewState() {
   if (state.mode === _lastSavedMode && state.selectedPresetName === _lastSavedPresetName) { return; }
