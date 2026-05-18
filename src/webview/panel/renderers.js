@@ -558,24 +558,6 @@ function renderUploadView(app) {
 
   // ---- Event listeners ----
 
-  select.addEventListener('change', function () {
-    state.selectedPresetName = select.value;
-    state.selectedPath = null;
-    state.addPathValue = '';
-    delete state.connectionStatus[select.value];
-    persistState();
-    render();
-  });
-
-  if (sendToSelect) {
-    sendToSelect.addEventListener('change', function () {
-      var val = sendToSelect.value;
-      state.selectedPath = (val === '__default__') ? null : val;
-      if (val !== '__add_new__') { state.addPathValue = ''; }
-      render();
-    });
-  }
-
   if (addPathInput) {
     addPathInput.addEventListener('input', function () {
       state.addPathValue = addPathInput.value;
